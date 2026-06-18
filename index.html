@@ -465,6 +465,10 @@
       return `${leaderboardApiBase}${path}`;
     }
 
+    function hasLeaderboardApi() {
+      return Boolean(leaderboardApiBase) || !window.location.hostname.endsWith("github.io");
+    }
+
     function updateNicknameUI() {
       playerBadge.textContent = state.nickname ? `Player: ${state.nickname}` : "Inserisci nickname";
       nicknameInput.readOnly = isNicknameLocked();
@@ -547,6 +551,12 @@
     }
 
     async function loadLeaderboard() {
+      if (!hasLeaderboardApi()) {
+        state.leaderboard = getLocalLeaderboard();
+        renderLeaderboard(state.leaderboard, true);
+        return;
+      }
+
       try {
         const response = await fetch(apiUrl("/api/leaderboard"), { cache: "no-store" });
         if (!response.ok) throw new Error("leaderboard unavailable");
@@ -565,6 +575,12 @@
         return;
       }
       const localRows = saveLocalScore(state.nickname, state.score);
+
+      if (!hasLeaderboardApi()) {
+        state.leaderboard = localRows;
+        renderLeaderboard(localRows, true);
+        return;
+      }
 
       try {
         const response = await fetch(apiUrl("/api/score"), {
