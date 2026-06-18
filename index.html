@@ -436,6 +436,14 @@
       bestCombo: 0,
       perfects: 0,
       bassDropUntil: 0,
+      cornerStreak: 0,
+      wideUntil: 0,
+      slowUntil: 0,
+      splitAtScore: 24,
+      splitCookies: null,
+      splitMerging: false,
+      perk: null,
+      nextPerkAt: 8,
       flashText: "",
       flashUntil: 0,
       best: Number(localStorage.getItem("discotti-pong-best") || 0),
@@ -917,6 +925,14 @@
       state.bestCombo = 0;
       state.perfects = 0;
       state.bassDropUntil = 0;
+      state.cornerStreak = 0;
+      state.wideUntil = 0;
+      state.slowUntil = 0;
+      state.splitAtScore = 24;
+      state.splitCookies = null;
+      state.splitMerging = false;
+      state.perk = null;
+      state.nextPerkAt = 8;
       state.flashText = "";
       state.flashUntil = 0;
       state.elapsed = 0;
@@ -970,10 +986,18 @@
       return performance.now() < state.bassDropUntil;
     }
 
+    function isWideActive() {
+      return performance.now() < state.wideUntil;
+    }
+
+    function isSlowActive() {
+      return performance.now() < state.slowUntil;
+    }
+
     function applyDifficulty() {
       const difficulty = getDifficulty();
       state.level = difficulty.level;
-      state.speaker.w = state.speaker.baseW * difficulty.paddleScale;
+      state.speaker.w = state.speaker.baseW * difficulty.paddleScale * (isWideActive() ? 1.26 : 1);
       state.speaker.x = clamp(state.speaker.x || state.width / 2, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
       state.speaker.targetX = clamp(state.speaker.targetX || state.speaker.x, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
       return difficulty;
@@ -1034,87 +1058,252 @@
     overlay.addEventListener("click", handleStartInput);
 
     function update(dt) {
-      const cookie = state.cookie;
       const speaker = state.speaker;
       const difficulty = applyDifficulty();
-      const speedScale = difficulty.speed;
+      const speedScale = difficulty.speed * (isSlowActive() ? .76 : 1);
 
       state.elapsed += dt;
       speaker.x += (speaker.targetX - speaker.x) * Math.min(1, dt * 18);
-      if (difficulty.curve) {
-        const wave = Math.sin(state.elapsed * (1.45 + difficulty.level * .22));
-        cookie.vx = clamp(cookie.vx + wave * difficulty.curve * dt, -560, 560);
+      state.shake = Math.max(0, state.shake - dt * 18);
+      maybeSpawnPerk();
+      maybeStartSplit();
+
+      if (state.splitMerging) {
+        updateSplitMerge(dt);
+        return;
       }
+
+      const cookies = state.splitCookies || [state.cookie];
+      for (const cookie of cookies) {
+        updateCookie(cookie, dt, difficulty, speedScale);
+        checkPerkHit(cookie);
+        if (cookie.y - cookie.r > state.height) {
+          gameOver();
+          return;
+        }
+      }
+    }
+
+    function updateCookie(cookie, dt, difficulty, speedScale) {
+      if (difficulty.curve) {
+        const wave = Math.sin(state.elapsed * (1.2 + difficulty.level * .18) + cookie.x * .01);
+        cookie.vx = clamp(cookie.vx + wave * difficulty.curve * dt * .55, -560, 560);
+      }
+
+      cookie.vy += 34 * dt;
+      cookie.vx *= 1 - Math.min(.05, dt * .35);
       cookie.x += cookie.vx * speedScale * dt;
       cookie.y += cookie.vy * speedScale * dt;
-      cookie.spin += cookie.vx * dt * .018;
-      state.shake = Math.max(0, state.shake - dt * 18);
+      cookie.spin += cookie.vx * dt * .015;
 
       if (cookie.x < cookie.r + 10) {
         cookie.x = cookie.r + 10;
-        cookie.vx = Math.abs(cookie.vx);
+        cookie.vx = Math.abs(cookie.vx) * .98;
         cookie.vy += rand(-difficulty.wallChaos, difficulty.wallChaos);
       }
 
       if (cookie.x > state.width - cookie.r - 10) {
         cookie.x = state.width - cookie.r - 10;
-        cookie.vx = -Math.abs(cookie.vx);
+        cookie.vx = -Math.abs(cookie.vx) * .98;
         cookie.vy += rand(-difficulty.wallChaos, difficulty.wallChaos);
       }
 
       if (cookie.y < cookie.r + 54) {
         cookie.y = cookie.r + 54;
-        cookie.vy = Math.abs(cookie.vy);
+        cookie.vy = Math.abs(cookie.vy) * .94;
+        registerUpperCorner(cookie);
       }
 
+      handleSpeakerHit(cookie, difficulty);
+    }
+
+    function handleSpeakerHit(cookie, difficulty) {
+      const speaker = state.speaker;
       const halfW = speaker.w / 2;
       const top = speaker.y - speaker.h / 2;
       const hitX = cookie.x > speaker.x - halfW - cookie.r && cookie.x < speaker.x + halfW + cookie.r;
       const hitY = cookie.y + cookie.r > top && cookie.y - cookie.r < speaker.y + speaker.h / 2;
 
-      if (cookie.vy > 0 && hitX && hitY) {
-        const rawImpact = (cookie.x - speaker.x) / halfW;
-        const perfect = Math.abs(rawImpact) <= .18;
-        let impact = rawImpact;
-        if (Math.abs(impact) < .16) {
-          impact = (Math.random() < .5 ? -1 : 1) * rand(.18, .32);
-        }
-        cookie.y = top - cookie.r;
-        cookie.vy = -Math.max(310, Math.abs(cookie.vy) + 10);
-        cookie.vx += impact * difficulty.impactBoost;
-        if (Math.abs(cookie.vx) < difficulty.minSideSpeed) {
-          cookie.vx = Math.sign(cookie.vx || impact) * difficulty.minSideSpeed;
-        }
-        cookie.vx = clamp(cookie.vx, -520, 520);
-        state.combo += 1;
-        state.bestCombo = Math.max(state.bestCombo, state.combo);
-        if (perfect) state.perfects += 1;
+      if (cookie.vy <= 0 || !hitX || !hitY) return;
 
-        let gained = perfect ? 2 : 1;
-        if (state.combo % 5 === 0) gained += 1;
-        if (isBassDropActive()) gained *= 2;
-        state.score += gained;
-        state.shake = .8;
-        comboEl.textContent = state.combo;
-        scoreEl.textContent = state.score;
-        state.flashText = perfect ? `PERFECT +${gained}` : `+${gained}`;
-        state.flashUntil = performance.now() + 620;
-
-        if (state.combo > 0 && state.combo % 12 === 0) {
-          state.bassDropUntil = performance.now() + 6500;
-          state.flashText = "BASS DROP";
-          state.flashUntil = performance.now() + 900;
-          state.shake = 1.8;
-        }
-
-        if (state.score > state.best) {
-          state.best = state.score;
-          bestEl.textContent = state.best;
-          localStorage.setItem("discotti-pong-best", String(state.best));
-        }
+      const rawImpact = clamp((cookie.x - speaker.x) / halfW, -1.05, 1.05);
+      const perfect = Math.abs(rawImpact) <= .17;
+      let impact = rawImpact;
+      if (Math.abs(impact) < .12) {
+        impact = Math.sign(cookie.vx || (Math.random() - .5)) * rand(.16, .28);
       }
 
-      if (cookie.y - cookie.r > state.height) gameOver();
+      cookie.y = top - cookie.r;
+      const incoming = Math.hypot(cookie.vx, cookie.vy);
+      const bounce = clamp(incoming * .64 + 185 + state.combo * 1.4, 315, 610);
+      cookie.vy = -bounce * (perfect ? 1.04 : 1);
+      cookie.vx = clamp(cookie.vx * .22 + impact * (difficulty.impactBoost + 85), -545, 545);
+      if (Math.abs(cookie.vx) < difficulty.minSideSpeed) {
+        cookie.vx = Math.sign(cookie.vx || impact) * difficulty.minSideSpeed;
+      }
+      cookie.spin += impact * 1.25;
+      cookie.touched = true;
+      registerBounce(perfect);
+    }
+
+    function registerBounce(perfect) {
+      state.combo += 1;
+      state.bestCombo = Math.max(state.bestCombo, state.combo);
+      if (perfect) state.perfects += 1;
+
+      let gained = perfect ? 2 : 1;
+      if (state.combo % 5 === 0) gained += 1;
+      if (isBassDropActive()) gained *= 2;
+      addScore(gained);
+      state.shake = perfect ? 1.2 : .75;
+      comboEl.textContent = state.combo;
+      showFlash(perfect ? `PERFECT +${gained}` : `+${gained}`, perfect ? 760 : 520);
+
+      if (state.combo > 0 && state.combo % 12 === 0) triggerBassDrop();
+
+      if (state.splitCookies && state.splitCookies.every((cookie) => cookie.touched)) {
+        state.splitMerging = true;
+        showFlash("RIUNIONE", 800);
+      }
+    }
+
+    function addScore(amount) {
+      state.score += amount;
+      scoreEl.textContent = state.score;
+
+      if (state.score > state.best) {
+        state.best = state.score;
+        bestEl.textContent = state.best;
+        localStorage.setItem("discotti-pong-best", String(state.best));
+      }
+    }
+
+    function showFlash(text, duration = 650) {
+      state.flashText = text;
+      state.flashUntil = performance.now() + duration;
+    }
+
+    function triggerBassDrop() {
+      state.bassDropUntil = performance.now() + 6500;
+      state.shake = 1.8;
+      showFlash("BASS DROP x2", 1100);
+    }
+
+    function registerUpperCorner(cookie) {
+      const inUpperLeft = cookie.x < state.width * .25;
+      const inUpperRight = cookie.x > state.width * .75;
+      if (!inUpperLeft && !inUpperRight) {
+        state.cornerStreak = 0;
+        return;
+      }
+
+      state.cornerStreak += 1;
+      if (state.cornerStreak >= 5) {
+        state.cornerStreak = 0;
+        addScore(8);
+        state.wideUntil = performance.now() + 7000;
+        showFlash("ANGOLO +8", 950);
+        state.shake = 2;
+      }
+    }
+
+    function maybeSpawnPerk() {
+      if (state.perk || state.score < state.nextPerkAt || state.splitCookies) return;
+      state.perk = {
+        x: rand(state.width * .22, state.width * .78),
+        y: rand(state.height * .22, state.height * .48),
+        r: clamp(state.width * .035, 12, 17),
+        type: ["wide", "slow", "bonus"][Math.floor(Math.random() * 3)],
+        until: performance.now() + 9000
+      };
+      state.nextPerkAt += rand(10, 16);
+    }
+
+    function checkPerkHit(cookie) {
+      const perk = state.perk;
+      if (!perk) return;
+      if (performance.now() > perk.until) {
+        state.perk = null;
+        return;
+      }
+
+      const distance = Math.hypot(cookie.x - perk.x, cookie.y - perk.y);
+      if (distance > cookie.r + perk.r) return;
+
+      if (perk.type === "wide") {
+        state.wideUntil = performance.now() + 7000;
+        showFlash("CASSA XL", 850);
+      } else if (perk.type === "slow") {
+        state.slowUntil = performance.now() + 6000;
+        showFlash("SLOW GROOVE", 850);
+      } else {
+        addScore(6);
+        showFlash("BONUS +6", 850);
+      }
+      state.perk = null;
+      state.shake = 1.3;
+    }
+
+    function maybeStartSplit() {
+      if (state.splitCookies || state.score < state.splitAtScore) return;
+      state.splitAtScore += 34;
+      const c = state.cookie;
+      const speedY = -Math.max(260, Math.abs(c.vy) * .72);
+      state.splitCookies = [
+        { x: c.x - c.r * .45, y: c.y, r: c.r * .92, vx: -Math.max(190, Math.abs(c.vx) + 85), vy: speedY, spin: c.spin, touched: false },
+        { x: c.x + c.r * .45, y: c.y, r: c.r * .92, vx: Math.max(190, Math.abs(c.vx) + 85), vy: speedY, spin: c.spin, touched: false }
+      ];
+      state.perk = null;
+      showFlash("DOPPIO BISCOTTO", 1100);
+    }
+
+    function updateSplitMerge(dt) {
+      if (!state.splitCookies) {
+        state.splitMerging = false;
+        return;
+      }
+
+      const targetX = state.width / 2;
+      const targetY = state.cookie.r + 72;
+      let done = true;
+
+      for (const cookie of state.splitCookies) {
+        cookie.x += (targetX - cookie.x) * Math.min(1, dt * 5.8);
+        cookie.y += (targetY - cookie.y) * Math.min(1, dt * 5.8);
+        cookie.spin += dt * 8;
+        if (Math.hypot(cookie.x - targetX, cookie.y - targetY) > 8) done = false;
+      }
+
+      if (done) triggerSplitFinale(targetX, targetY);
+    }
+
+    function triggerSplitFinale(x, y) {
+      const events = ["bass", "wide", "slow", "bonus"];
+      const event = events[Math.floor(Math.random() * events.length)];
+      state.cookie = {
+        x,
+        y,
+        r: clamp(state.width * .047, 15, 25),
+        vx: (Math.random() < .5 ? -1 : 1) * rand(180, 310),
+        vy: Math.max(280, state.height * .34),
+        spin: 0
+      };
+      state.splitCookies = null;
+      state.splitMerging = false;
+
+      if (event === "bass") {
+        triggerBassDrop();
+      } else if (event === "wide") {
+        state.wideUntil = performance.now() + 8000;
+        showFlash("CASSA XXL", 1000);
+      } else if (event === "slow") {
+        state.slowUntil = performance.now() + 6500;
+        showFlash("SLOW PAZZO", 1000);
+      } else {
+        addScore(12);
+        showFlash("BISCOTTO +12", 1000);
+      }
+      state.shake = 2.4;
     }
 
     function drawBackground() {
@@ -1153,19 +1342,25 @@
       const remaining = state.flashUntil - performance.now();
       if (remaining <= 0 || !state.flashText) return;
 
+      const y = Math.max(112, state.height * .22);
+      const width = Math.min(190, state.width * .62);
       ctx.save();
       ctx.globalAlpha = clamp(remaining / 500, 0, 1);
+      ctx.fillStyle = "rgba(255, 255, 255, .88)";
+      ctx.shadowColor = "rgba(11, 42, 146, .34)";
+      ctx.shadowBlur = 18;
+      roundRect(state.width / 2 - width / 2, y - 19, width, 34, 8);
+      ctx.fill();
       ctx.fillStyle = "#0b2a92";
-      ctx.font = "900 24px Inter, system-ui, sans-serif";
+      ctx.font = "900 17px Inter, system-ui, sans-serif";
       ctx.textAlign = "center";
-      ctx.shadowColor = "rgba(255,255,255,.9)";
-      ctx.shadowBlur = 10;
-      ctx.fillText(state.flashText, state.width / 2, Math.max(118, state.height * .24));
+      ctx.shadowBlur = 0;
+      ctx.fillText(state.flashText, state.width / 2, y + 6);
       ctx.restore();
     }
 
-    function drawCookie() {
-      const c = state.cookie;
+    function drawCookie(cookie) {
+      const c = cookie || state.cookie;
       ctx.save();
       ctx.translate(c.x + rand(-state.shake, state.shake), c.y + rand(-state.shake, state.shake));
       ctx.rotate(c.spin);
@@ -1192,6 +1387,51 @@
       ctx.beginPath();
       ctx.arc(0, 0, c.r - 3, .25, Math.PI * 1.34);
       ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawCookies() {
+      const cookies = state.splitCookies || [state.cookie];
+      cookies.forEach((cookie) => drawCookie(cookie));
+    }
+
+    function drawPerk() {
+      const perk = state.perk;
+      if (!perk) return;
+
+      const pulse = 1 + Math.sin(state.elapsed * 8) * .08;
+      ctx.save();
+      ctx.translate(perk.x, perk.y);
+      ctx.scale(pulse, pulse);
+      ctx.globalAlpha = clamp((perk.until - performance.now()) / 900, .35, 1);
+      ctx.fillStyle = "rgba(255,255,255,.88)";
+      ctx.strokeStyle = "#0b2a92";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, perk.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#0b2a92";
+      ctx.font = "900 11px Inter, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(perk.type === "wide" ? "XL" : perk.type === "slow" ? "S" : "+", 0, 1);
+      ctx.restore();
+    }
+
+    function drawBassDropStatus() {
+      if (!isBassDropActive()) return;
+
+      const remaining = Math.ceil((state.bassDropUntil - performance.now()) / 1000);
+      ctx.save();
+      ctx.fillStyle = "rgba(11, 42, 146, .9)";
+      roundRect(state.width / 2 - 64, 76, 128, 30, 8);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = "900 12px Inter, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`BASS DROP x2 ${remaining}s`, state.width / 2, 91);
       ctx.restore();
     }
 
@@ -1253,8 +1493,10 @@
       state.last = now;
       update(dt);
       drawBackground();
+      drawPerk();
       drawSpeaker();
-      drawCookie();
+      drawCookies();
+      drawBassDropStatus();
       drawFlashText();
       requestAnimationFrame(loop);
     }
@@ -1262,8 +1504,10 @@
     resize();
     loadLeaderboard();
     drawBackground();
+    drawPerk();
     drawSpeaker();
-    drawCookie();
+    drawCookies();
+    drawBassDropStatus();
     drawFlashText();
   </script>
 </body>
