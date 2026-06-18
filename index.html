@@ -437,11 +437,11 @@
       perfects: 0,
       bassDropUntil: 0,
       cornerStreak: 0,
-      wideUntil: 0,
       slowUntil: 0,
+      honeyUntil: 0,
+      doubleUntil: 0,
       splitAtScore: 24,
       splitCookies: null,
-      splitMerging: false,
       perk: null,
       nextPerkAt: 8,
       flashText: "",
@@ -926,11 +926,11 @@
       state.perfects = 0;
       state.bassDropUntil = 0;
       state.cornerStreak = 0;
-      state.wideUntil = 0;
       state.slowUntil = 0;
+      state.honeyUntil = 0;
+      state.doubleUntil = 0;
       state.splitAtScore = 24;
       state.splitCookies = null;
-      state.splitMerging = false;
       state.perk = null;
       state.nextPerkAt = 8;
       state.flashText = "";
@@ -974,7 +974,7 @@
       return {
         level,
         speed: 1 + Math.min(state.score, 70) * .014 + (level - 1) * .025,
-        paddleScale: Math.max(.62, 1 - Math.min(state.score, 50) * .008),
+        paddleScale: Math.max(.58, 1 - Math.min(state.score, 65) * .0065),
         curve: state.score < 4 ? 0 : Math.min(118, (state.score - 3) * 4.2),
         wallChaos: Math.min(76, 24 + (level - 1) * 8),
         impactBoost: 235 + level * 24,
@@ -986,18 +986,26 @@
       return performance.now() < state.bassDropUntil;
     }
 
-    function isWideActive() {
-      return performance.now() < state.wideUntil;
-    }
-
     function isSlowActive() {
       return performance.now() < state.slowUntil;
+    }
+
+    function isHoneyActive() {
+      return performance.now() < state.honeyUntil;
+    }
+
+    function isDoubleActive() {
+      return performance.now() < state.doubleUntil;
+    }
+
+    function cookieRadius(cookie) {
+      return cookie.r * (isHoneyActive() ? 1.12 : 1);
     }
 
     function applyDifficulty() {
       const difficulty = getDifficulty();
       state.level = difficulty.level;
-      state.speaker.w = state.speaker.baseW * difficulty.paddleScale * (isWideActive() ? 1.26 : 1);
+      state.speaker.w = state.speaker.baseW * difficulty.paddleScale;
       state.speaker.x = clamp(state.speaker.x || state.width / 2, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
       state.speaker.targetX = clamp(state.speaker.targetX || state.speaker.x, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
       return difficulty;
@@ -1060,7 +1068,7 @@
     function update(dt) {
       const speaker = state.speaker;
       const difficulty = applyDifficulty();
-      const speedScale = difficulty.speed * (isSlowActive() ? .76 : 1);
+      const speedScale = difficulty.speed * (isSlowActive() ? .76 : 1) * (isHoneyActive() ? .88 : 1);
 
       state.elapsed += dt;
       speaker.x += (speaker.targetX - speaker.x) * Math.min(1, dt * 18);
@@ -1068,16 +1076,11 @@
       maybeSpawnPerk();
       maybeStartSplit();
 
-      if (state.splitMerging) {
-        updateSplitMerge(dt);
-        return;
-      }
-
       const cookies = state.splitCookies || [state.cookie];
       for (const cookie of cookies) {
         updateCookie(cookie, dt, difficulty, speedScale);
         checkPerkHit(cookie);
-        if (cookie.y - cookie.r > state.height) {
+        if (cookie.y - cookieRadius(cookie) > state.height) {
           gameOver();
           return;
         }
@@ -1085,31 +1088,32 @@
     }
 
     function updateCookie(cookie, dt, difficulty, speedScale) {
+      const radius = cookieRadius(cookie);
       if (difficulty.curve) {
         const wave = Math.sin(state.elapsed * (1.2 + difficulty.level * .18) + cookie.x * .01);
         cookie.vx = clamp(cookie.vx + wave * difficulty.curve * dt * .55, -560, 560);
       }
 
-      cookie.vy += 34 * dt;
+      cookie.vy += (isHoneyActive() ? 24 : 34) * dt;
       cookie.vx *= 1 - Math.min(.05, dt * .35);
       cookie.x += cookie.vx * speedScale * dt;
       cookie.y += cookie.vy * speedScale * dt;
       cookie.spin += cookie.vx * dt * .015;
 
-      if (cookie.x < cookie.r + 10) {
-        cookie.x = cookie.r + 10;
+      if (cookie.x < radius + 10) {
+        cookie.x = radius + 10;
         cookie.vx = Math.abs(cookie.vx) * .98;
         cookie.vy += rand(-difficulty.wallChaos, difficulty.wallChaos);
       }
 
-      if (cookie.x > state.width - cookie.r - 10) {
-        cookie.x = state.width - cookie.r - 10;
+      if (cookie.x > state.width - radius - 10) {
+        cookie.x = state.width - radius - 10;
         cookie.vx = -Math.abs(cookie.vx) * .98;
         cookie.vy += rand(-difficulty.wallChaos, difficulty.wallChaos);
       }
 
-      if (cookie.y < cookie.r + 54) {
-        cookie.y = cookie.r + 54;
+      if (cookie.y < radius + 54) {
+        cookie.y = radius + 54;
         cookie.vy = Math.abs(cookie.vy) * .94;
         registerUpperCorner(cookie);
       }
@@ -1119,10 +1123,11 @@
 
     function handleSpeakerHit(cookie, difficulty) {
       const speaker = state.speaker;
+      const radius = cookieRadius(cookie);
       const halfW = speaker.w / 2;
       const top = speaker.y - speaker.h / 2;
-      const hitX = cookie.x > speaker.x - halfW - cookie.r && cookie.x < speaker.x + halfW + cookie.r;
-      const hitY = cookie.y + cookie.r > top && cookie.y - cookie.r < speaker.y + speaker.h / 2;
+      const hitX = cookie.x > speaker.x - halfW - radius && cookie.x < speaker.x + halfW + radius;
+      const hitY = cookie.y + radius > top && cookie.y - radius < speaker.y + speaker.h / 2;
 
       if (cookie.vy <= 0 || !hitX || !hitY) return;
 
@@ -1133,7 +1138,7 @@
         impact = Math.sign(cookie.vx || (Math.random() - .5)) * rand(.16, .28);
       }
 
-      cookie.y = top - cookie.r;
+      cookie.y = top - radius;
       const incoming = Math.hypot(cookie.vx, cookie.vy);
       const bounce = clamp(incoming * .64 + 185 + state.combo * 1.4, 315, 610);
       cookie.vy = -bounce * (perfect ? 1.04 : 1);
@@ -1153,7 +1158,7 @@
 
       let gained = perfect ? 2 : 1;
       if (state.combo % 5 === 0) gained += 1;
-      if (isBassDropActive()) gained *= 2;
+      if (isBassDropActive() || isDoubleActive()) gained *= 2;
       addScore(gained);
       state.shake = perfect ? 1.2 : .75;
       comboEl.textContent = state.combo;
@@ -1162,8 +1167,7 @@
       if (state.combo > 0 && state.combo % 12 === 0) triggerBassDrop();
 
       if (state.splitCookies && state.splitCookies.every((cookie) => cookie.touched)) {
-        state.splitMerging = true;
-        showFlash("RIUNIONE", 800);
+        triggerSplitFinale(state.width / 2, state.cookie.r + 72);
       }
     }
 
@@ -1186,7 +1190,7 @@
     function triggerBassDrop() {
       state.bassDropUntil = performance.now() + 6500;
       state.shake = 1.8;
-      showFlash("BASS DROP x2", 1100);
+      showFlash("BASS DROP: PUNTI x2", 1100);
     }
 
     function registerUpperCorner(cookie) {
@@ -1201,8 +1205,8 @@
       if (state.cornerStreak >= 5) {
         state.cornerStreak = 0;
         addScore(8);
-        state.wideUntil = performance.now() + 7000;
-        showFlash("ANGOLO +8", 950);
+        state.doubleUntil = performance.now() + 5500;
+        showFlash("ANGOLO +8 / x2", 950);
         state.shake = 2;
       }
     }
@@ -1213,7 +1217,7 @@
         x: rand(state.width * .22, state.width * .78),
         y: rand(state.height * .22, state.height * .48),
         r: clamp(state.width * .035, 12, 17),
-        type: ["wide", "slow", "bonus"][Math.floor(Math.random() * 3)],
+        type: ["honey", "slow", "bonus"][Math.floor(Math.random() * 3)],
         until: performance.now() + 9000
       };
       state.nextPerkAt += rand(10, 16);
@@ -1228,17 +1232,17 @@
       }
 
       const distance = Math.hypot(cookie.x - perk.x, cookie.y - perk.y);
-      if (distance > cookie.r + perk.r) return;
+      if (distance > cookieRadius(cookie) + perk.r) return;
 
-      if (perk.type === "wide") {
-        state.wideUntil = performance.now() + 7000;
-        showFlash("CASSA XL", 850);
+      if (perk.type === "honey") {
+        state.honeyUntil = performance.now() + 6500;
+        showFlash("MIELE", 850);
       } else if (perk.type === "slow") {
         state.slowUntil = performance.now() + 6000;
         showFlash("SLOW GROOVE", 850);
       } else {
-        addScore(6);
-        showFlash("BONUS +6", 850);
+        state.doubleUntil = performance.now() + 5000;
+        showFlash("DISCOTTI x2", 850);
       }
       state.perk = null;
       state.shake = 1.3;
@@ -1257,28 +1261,8 @@
       showFlash("DOPPIO BISCOTTO", 1100);
     }
 
-    function updateSplitMerge(dt) {
-      if (!state.splitCookies) {
-        state.splitMerging = false;
-        return;
-      }
-
-      const targetX = state.width / 2;
-      const targetY = state.cookie.r + 72;
-      let done = true;
-
-      for (const cookie of state.splitCookies) {
-        cookie.x += (targetX - cookie.x) * Math.min(1, dt * 5.8);
-        cookie.y += (targetY - cookie.y) * Math.min(1, dt * 5.8);
-        cookie.spin += dt * 8;
-        if (Math.hypot(cookie.x - targetX, cookie.y - targetY) > 8) done = false;
-      }
-
-      if (done) triggerSplitFinale(targetX, targetY);
-    }
-
     function triggerSplitFinale(x, y) {
-      const events = ["bass", "wide", "slow", "bonus"];
+      const events = ["bass", "honey", "slow", "bonus"];
       const event = events[Math.floor(Math.random() * events.length)];
       state.cookie = {
         x,
@@ -1289,19 +1273,18 @@
         spin: 0
       };
       state.splitCookies = null;
-      state.splitMerging = false;
 
       if (event === "bass") {
         triggerBassDrop();
-      } else if (event === "wide") {
-        state.wideUntil = performance.now() + 8000;
-        showFlash("CASSA XXL", 1000);
+      } else if (event === "honey") {
+        state.honeyUntil = performance.now() + 8000;
+        showFlash("MIELE PAZZO", 1000);
       } else if (event === "slow") {
         state.slowUntil = performance.now() + 6500;
         showFlash("SLOW PAZZO", 1000);
       } else {
-        addScore(12);
-        showFlash("BISCOTTO +12", 1000);
+        state.doubleUntil = performance.now() + 7000;
+        showFlash("DISCOTTI x2", 1000);
       }
       state.shake = 2.4;
     }
@@ -1361,31 +1344,32 @@
 
     function drawCookie(cookie) {
       const c = cookie || state.cookie;
+      const radius = cookieRadius(c);
       ctx.save();
       ctx.translate(c.x + rand(-state.shake, state.shake), c.y + rand(-state.shake, state.shake));
       ctx.rotate(c.spin);
 
-      const grad = ctx.createRadialGradient(-c.r * .35, -c.r * .45, c.r * .2, 0, 0, c.r);
+      const grad = ctx.createRadialGradient(-radius * .35, -radius * .45, radius * .2, 0, 0, radius);
       grad.addColorStop(0, "#ffd98b");
       grad.addColorStop(.72, "#c98636");
       grad.addColorStop(1, "#8f5424");
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(0, 0, c.r, 0, Math.PI * 2);
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = "#583019";
       const chips = [[-.42, -.28, .18], [.16, -.38, .15], [.42, .05, .17], [-.1, .18, .14], [-.38, .38, .13], [.17, .42, .12]];
       chips.forEach(([x, y, r]) => {
         ctx.beginPath();
-        ctx.arc(x * c.r, y * c.r, r * c.r, 0, Math.PI * 2);
+        ctx.arc(x * radius, y * radius, r * radius, 0, Math.PI * 2);
         ctx.fill();
       });
 
       ctx.strokeStyle = "rgba(255, 244, 204, .55)";
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(0, 0, c.r - 3, .25, Math.PI * 1.34);
+      ctx.arc(0, 0, radius - 3, .25, Math.PI * 1.34);
       ctx.stroke();
       ctx.restore();
     }
@@ -1415,7 +1399,7 @@
       ctx.font = "900 11px Inter, system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(perk.type === "wide" ? "XL" : perk.type === "slow" ? "S" : "+", 0, 1);
+      ctx.fillText(perk.type === "honey" ? "M" : perk.type === "slow" ? "S" : "x2", 0, 1);
       ctx.restore();
     }
 
@@ -1431,7 +1415,7 @@
       ctx.font = "900 12px Inter, system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`BASS DROP x2 ${remaining}s`, state.width / 2, 91);
+      ctx.fillText(`PUNTI x2 ${remaining}s`, state.width / 2, 91);
       ctx.restore();
     }
 
@@ -1449,6 +1433,11 @@
 
       ctx.fillStyle = "#111315";
       roundRect(x + 8, y + 5, s.w - 16, s.h - 10, 5);
+      ctx.fill();
+
+      const perfectW = Math.max(18, s.w * .23);
+      ctx.fillStyle = "#fff1a8";
+      roundRect(s.x - perfectW / 2, y + 5, perfectW, s.h - 10, 5);
       ctx.fill();
 
       const coneR = s.h * .34;
