@@ -1,0 +1,1126 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Discotti Pong</title>
+  <meta name="description" content="Sfida gli amici a Discotti Pong: tieni in gioco il biscotto con la cassa audio.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Discotti Pong">
+  <meta property="og:description" content="Tocca, trascina la cassa e fai rimbalzare il biscotto. Riuscirai a battere il record?">
+  <meta property="og:image" content="share-card.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#0b2a92">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='27' fill='%23c98636'/%3E%3Ccircle cx='23' cy='22' r='4' fill='%23583019'/%3E%3Ccircle cx='40' cy='27' r='5' fill='%23583019'/%3E%3Ccircle cx='28' cy='42' r='4' fill='%23583019'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light;
+      --blue: #0b2a92;
+      --ink: #0b2a92;
+      --muted: rgba(11, 42, 146, .7);
+      --bg: #f8fbff;
+      --line: rgba(11, 42, 146, .22);
+      --accent: #0b2a92;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      touch-action: none;
+      user-select: none;
+    }
+
+    body {
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      background: #dfeaff;
+    }
+
+    .game {
+      position: relative;
+      width: min(100vw, 430px);
+      height: 100svh;
+      max-height: 932px;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      background:
+        linear-gradient(180deg, rgba(11, 42, 146, .05), rgba(255, 255, 255, .98) 45%),
+        var(--bg);
+      box-shadow: 0 0 0 1px rgba(11, 42, 146, .12), 0 18px 70px rgba(11, 42, 146, .14);
+    }
+
+    .topbar,
+    .bottombar {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: max(12px, env(safe-area-inset-top)) 14px 10px;
+      pointer-events: none;
+    }
+
+    .topbar {
+      grid-row: 1;
+    }
+
+    .bottombar {
+      grid-row: 3;
+      padding: 8px 14px max(14px, env(safe-area-inset-bottom));
+      justify-content: center;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+      text-align: center;
+    }
+
+    .brand {
+      min-width: 0;
+      font-weight: 900;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      font-size: clamp(18px, 5vw, 30px);
+      color: var(--ink);
+      text-shadow: 0 2px 0 rgba(255, 255, 255, .9);
+      white-space: nowrap;
+    }
+
+    .title-block {
+      min-width: 0;
+    }
+
+    .player {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stats {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .pill {
+      min-width: 58px;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .86);
+      text-align: center;
+      font-weight: 800;
+      font-size: 15px;
+      line-height: 1;
+      box-shadow: 0 8px 24px rgba(11, 42, 146, .08), inset 0 1px rgba(255, 255, 255, .9);
+    }
+
+    .pill span {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      background: rgba(255, 255, 255, .66);
+      backdrop-filter: blur(5px);
+    }
+
+    .panel {
+      width: min(360px, 100%);
+      border: 1px solid rgba(11, 42, 146, .2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, .94);
+      padding: 18px;
+      box-shadow: 0 18px 50px rgba(11, 42, 146, .18);
+      display: flex;
+      flex-direction: column;
+      text-align: center;
+    }
+
+    .panel h1 {
+      margin: 0 0 8px;
+      font-size: clamp(28px, 10vw, 46px);
+      line-height: .9;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .panel p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .nickname-label {
+      display: block;
+      margin: 0 0 6px;
+      color: var(--ink);
+      font-size: 11px;
+      font-weight: 900;
+      text-align: left;
+      text-transform: uppercase;
+    }
+
+    input {
+      width: 100%;
+      height: 44px;
+      margin: 0 0 12px;
+      border: 1px solid rgba(11, 42, 146, .26);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--ink);
+      font: inherit;
+      font-size: 16px;
+      font-weight: 800;
+      outline: 0;
+      padding: 0 12px;
+      text-align: center;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(11, 42, 146, .12);
+    }
+
+    .actions {
+      display: grid;
+      gap: 10px;
+    }
+
+    button {
+      width: 100%;
+      min-height: 46px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #ffffff;
+      font: inherit;
+      font-weight: 900;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: 0 4px 0 #061b64;
+    }
+
+    button:active {
+      transform: translateY(3px);
+      box-shadow: 0 1px 0 #061b64;
+    }
+
+    .secondary {
+      background: #ffffff;
+      color: var(--ink);
+      border: 1px solid rgba(11, 42, 146, .28);
+      box-shadow: 0 4px 0 rgba(11, 42, 146, .18);
+    }
+
+    .hint {
+      min-height: 16px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .leaderboard {
+      margin-top: 12px;
+      border-top: 1px solid rgba(11, 42, 146, .14);
+      padding-top: 10px;
+      text-align: left;
+    }
+
+    .leaderboard-title {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .leaderboard-list {
+      display: grid;
+      gap: 5px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .leaderboard-row {
+      display: grid;
+      grid-template-columns: 24px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 24px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .leaderboard-rank {
+      color: var(--muted);
+      font-size: 11px;
+      text-align: right;
+    }
+
+    .leaderboard-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .leaderboard-score {
+      min-width: 28px;
+      text-align: right;
+    }
+
+    .overlay.mode-welcome .nickname-label,
+    .overlay.mode-welcome input,
+    .overlay.mode-welcome .hint,
+    .overlay.mode-welcome #shareButton,
+    .overlay.mode-welcome .leaderboard {
+      display: none;
+    }
+
+    .overlay.mode-nickname #shareButton,
+    .overlay.mode-nickname .leaderboard {
+      display: none;
+    }
+
+    .overlay.is-game-over .nickname-label,
+    .overlay.is-game-over input,
+    .overlay.is-game-over .hint,
+    .overlay.is-game-over #shareButton {
+      display: none;
+    }
+
+    .overlay.is-game-over .leaderboard {
+      order: 3;
+      margin-top: 2px;
+      margin-bottom: 14px;
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .overlay.is-game-over .actions {
+      order: 4;
+    }
+
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main class="game" aria-label="Discotti Pong">
+    <canvas id="gameCanvas"></canvas>
+
+    <header class="topbar">
+      <div class="title-block">
+        <div class="brand">Discotti Pong</div>
+        <div class="player" id="playerBadge">Inserisci nickname</div>
+      </div>
+      <div class="stats" aria-live="polite">
+        <div class="pill"><span>Punti</span><b id="score">0</b></div>
+        <div class="pill"><span>Liv</span><b id="level">1</b></div>
+        <div class="pill"><span>Best</span><b id="best">0</b></div>
+      </div>
+    </header>
+
+    <footer class="bottombar">Trascina la cassa audio. Fai rimbalzare il biscotto.</footer>
+
+    <section class="overlay" id="overlay">
+      <div class="panel">
+        <h1 id="overlayTitle">Discotti Pong</h1>
+        <p id="overlayText">Tocca Gioca e preparati a far rimbalzare il biscotto.</p>
+        <label class="nickname-label" for="nicknameInput">Nickname</label>
+        <input id="nicknameInput" type="text" maxlength="14" autocomplete="nickname" inputmode="text" placeholder="Es. Matteo">
+        <div class="actions">
+          <button id="startButton" type="button">Gioca</button>
+          <button id="shareButton" class="secondary" type="button">Condividi su WhatsApp</button>
+        </div>
+        <p class="hint" id="saveHint">Il nickname resta salvato su questo telefono.</p>
+        <div class="leaderboard" aria-live="polite">
+          <p class="leaderboard-title">Classifica</p>
+          <ol class="leaderboard-list" id="leaderboardList">
+            <li class="leaderboard-row"><span class="leaderboard-rank">-</span><span class="leaderboard-name">Caricamento</span><span class="leaderboard-score">...</span></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const game = document.querySelector(".game");
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const scoreEl = document.getElementById("score");
+    const levelEl = document.getElementById("level");
+    const bestEl = document.getElementById("best");
+    const overlay = document.getElementById("overlay");
+    const overlayTitle = document.getElementById("overlayTitle");
+    const overlayText = document.getElementById("overlayText");
+    const startButton = document.getElementById("startButton");
+    const shareButton = document.getElementById("shareButton");
+    const nicknameInput = document.getElementById("nicknameInput");
+    const playerBadge = document.getElementById("playerBadge");
+    const saveHint = document.getElementById("saveHint");
+    const leaderboardList = document.getElementById("leaderboardList");
+    const logo = new Image();
+    logo.src = "DiscottiLogo-bg.png";
+    const leaderboardApiBase = "";
+
+    const state = {
+      width: 0,
+      height: 0,
+      dpr: 1,
+      running: false,
+      score: 0,
+      level: 1,
+      best: Number(localStorage.getItem("discotti-pong-best") || 0),
+      nickname: localStorage.getItem("discotti-pong-nickname") || "",
+      leaderboard: [],
+      overlayMode: "welcome",
+      inputReadyAt: 0,
+      last: 0,
+      elapsed: 0,
+      shake: 0,
+      cookie: { x: 0, y: 0, r: 18, vx: 220, vy: -320, spin: 0 },
+      speaker: { x: 0, y: 0, baseW: 108, w: 108, h: 28, targetX: 0 }
+    };
+
+    const music = {
+      context: null,
+      master: null,
+      noise: null,
+      timer: null,
+      nextTime: 0,
+      step: 0,
+      bpm: 124
+    };
+
+    logo.addEventListener("load", () => {
+      if (!state.running) {
+        drawBackground();
+        drawSpeaker();
+        drawCookie();
+      }
+    });
+
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    const rand = (min, max) => min + Math.random() * (max - min);
+
+    bestEl.textContent = state.best;
+    levelEl.textContent = state.level;
+    nicknameInput.value = state.nickname;
+    updateNicknameUI();
+    setOverlayMode("welcome");
+
+    function cleanNickname(value) {
+      return value.trim().replace(/\s+/g, " ").slice(0, 14);
+    }
+
+    function getLockedNickname() {
+      return cleanNickname(localStorage.getItem("discotti-pong-nickname") || "");
+    }
+
+    function isNicknameLocked() {
+      return Boolean(getLockedNickname());
+    }
+
+    function apiUrl(path) {
+      return `${leaderboardApiBase}${path}`;
+    }
+
+    function updateNicknameUI() {
+      playerBadge.textContent = state.nickname ? `Player: ${state.nickname}` : "Inserisci nickname";
+      nicknameInput.readOnly = isNicknameLocked();
+    }
+
+    function setOverlayMode(mode) {
+      state.overlayMode = mode;
+      overlay.classList.remove("mode-welcome", "mode-nickname", "is-game-over");
+
+      if (mode === "welcome") {
+        overlay.classList.add("mode-welcome");
+        overlayTitle.textContent = "Discotti Pong";
+        overlayText.textContent = "Tocca Gioca e preparati a far rimbalzare il biscotto.";
+        startButton.textContent = "Gioca";
+        return;
+      }
+
+      if (mode === "nickname") {
+        overlay.classList.add("mode-nickname");
+        state.inputReadyAt = performance.now() + 350;
+        overlayTitle.textContent = "Nickname";
+        overlayText.textContent = isNicknameLocked() ? "Nickname gia scelto su questo telefono." : "Inserisci il nickname per iniziare la partita.";
+        startButton.textContent = "Inizia";
+        saveHint.textContent = isNicknameLocked() ? "Il nickname e bloccato su questo telefono." : "Sceglilo bene: poi resta quello.";
+        if (!isNicknameLocked()) {
+          requestAnimationFrame(() => nicknameInput.focus());
+        }
+        return;
+      }
+
+      if (mode === "gameover") {
+        overlay.classList.add("is-game-over");
+        overlayTitle.textContent = "Classifica generale";
+        overlayText.textContent = state.nickname ? `${state.nickname}, hai fatto ${state.score} punti.` : `Hai fatto ${state.score} punti.`;
+        startButton.textContent = "Rigioca";
+      }
+    }
+
+    function renderLeaderboard(rows, offline) {
+      const list = rows && rows.length ? rows : [{ nickname: "Nessun punteggio", score: 0 }];
+      leaderboardList.innerHTML = list.slice(0, 8).map((row, index) => `
+        <li class="leaderboard-row">
+          <span class="leaderboard-rank">${rows && rows.length ? index + 1 : "-"}</span>
+          <span class="leaderboard-name">${escapeHtml(row.nickname || "Player")}</span>
+          <span class="leaderboard-score">${Number(row.score || 0)}</span>
+        </li>
+      `).join("");
+
+      if (offline) {
+        saveHint.textContent = "Classifica locale: server non raggiungibile.";
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;"
+      })[char]);
+    }
+
+    function getLocalLeaderboard() {
+      try {
+        return JSON.parse(localStorage.getItem("discotti-pong-local-leaderboard") || "[]");
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function saveLocalScore(nickname, score) {
+      const existing = getLocalLeaderboard().find((row) => row.nickname === nickname);
+      const bestScore = Math.max(score, Number(existing && existing.score) || 0);
+      const rows = getLocalLeaderboard().filter((row) => row.nickname !== nickname);
+      rows.push({ nickname, score: bestScore, at: Date.now() });
+      rows.sort((a, b) => b.score - a.score || a.at - b.at);
+      localStorage.setItem("discotti-pong-local-leaderboard", JSON.stringify(rows.slice(0, 8)));
+      return rows.slice(0, 8);
+    }
+
+    async function loadLeaderboard() {
+      try {
+        const response = await fetch(apiUrl("/api/leaderboard"), { cache: "no-store" });
+        if (!response.ok) throw new Error("leaderboard unavailable");
+        const data = await response.json();
+        state.leaderboard = Array.isArray(data.scores) ? data.scores : [];
+        renderLeaderboard(state.leaderboard, false);
+      } catch (error) {
+        state.leaderboard = getLocalLeaderboard();
+        renderLeaderboard(state.leaderboard, true);
+      }
+    }
+
+    async function submitScore() {
+      if (!state.nickname || state.score <= 0) {
+        await loadLeaderboard();
+        return;
+      }
+      const localRows = saveLocalScore(state.nickname, state.score);
+
+      try {
+        const response = await fetch(apiUrl("/api/score"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nickname: state.nickname, score: state.score })
+        });
+        if (!response.ok) throw new Error("score rejected");
+        const data = await response.json();
+        state.leaderboard = Array.isArray(data.scores) ? data.scores : localRows;
+        renderLeaderboard(state.leaderboard, false);
+      } catch (error) {
+        state.leaderboard = localRows;
+        renderLeaderboard(localRows, true);
+      }
+    }
+
+    function saveNickname(required) {
+      const lockedNickname = getLockedNickname();
+      if (lockedNickname) {
+        state.nickname = lockedNickname;
+        nicknameInput.value = lockedNickname;
+        saveHint.textContent = "Il nickname e bloccato su questo telefono.";
+        updateNicknameUI();
+        return true;
+      }
+
+      const nickname = cleanNickname(nicknameInput.value);
+      if (!nickname && required) {
+        saveHint.textContent = "Scrivi un nickname per iniziare.";
+        nicknameInput.focus();
+        return false;
+      }
+
+      if (nickname) {
+        state.nickname = nickname;
+        localStorage.setItem("discotti-pong-nickname", nickname);
+        nicknameInput.value = nickname;
+        saveHint.textContent = "Nickname salvato e bloccato su questo telefono.";
+      }
+
+      updateNicknameUI();
+      return true;
+    }
+
+    function getCleanUrl() {
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.hash = "";
+      return url.href;
+    }
+
+    function ensureMusic() {
+      const AudioEngine = window.AudioContext || window.webkitAudioContext;
+      if (!AudioEngine) return null;
+
+      if (!music.context) {
+        music.context = new AudioEngine();
+        music.master = music.context.createGain();
+        music.master.gain.value = .62;
+        music.master.connect(music.context.destination);
+        music.noise = createNoiseBuffer();
+      }
+
+      return music.context;
+    }
+
+    function createNoiseBuffer() {
+      const ctx = music.context;
+      const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i += 1) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      return buffer;
+    }
+
+    function startSoundtrack() {
+      const ctx = ensureMusic();
+      if (!ctx || music.timer) return;
+
+      ctx.resume();
+      music.step = 0;
+      music.nextTime = ctx.currentTime + .04;
+      music.timer = window.setInterval(scheduleMusic, 25);
+    }
+
+    function stopSoundtrack() {
+      if (!music.timer) return;
+      window.clearInterval(music.timer);
+      music.timer = null;
+    }
+
+    function scheduleMusic() {
+      const ctx = music.context;
+      if (!ctx) return;
+
+      const lookAhead = .14;
+      const stepTime = 60 / music.bpm / 4;
+
+      while (music.nextTime < ctx.currentTime + lookAhead) {
+        scheduleMusicStep(music.step % 16, music.nextTime);
+        music.nextTime += stepTime;
+        music.step = (music.step + 1) % 16;
+      }
+    }
+
+    function scheduleMusicStep(step, time) {
+      if (step % 4 === 0) playKick(time);
+      if (step === 4 || step === 12) playClap(time);
+      if (step % 4 === 2) {
+        playHat(time, true);
+        playBass(time, [55, 65.41, 61.74, 73.42][Math.floor(step / 4)]);
+      } else if (step % 2 === 1) {
+        playHat(time, false);
+      }
+    }
+
+    function playKick(time) {
+      const ctx = music.context;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(142, time);
+      osc.frequency.exponentialRampToValueAtTime(43, time + .16);
+      gain.gain.setValueAtTime(.98, time);
+      gain.gain.exponentialRampToValueAtTime(.001, time + .32);
+
+      osc.connect(gain);
+      gain.connect(music.master);
+      osc.start(time);
+      osc.stop(time + .34);
+    }
+
+    function playClap(time) {
+      for (let i = 0; i < 3; i += 1) {
+        const t = time + i * .014;
+        const src = music.context.createBufferSource();
+        const filter = music.context.createBiquadFilter();
+        const gain = music.context.createGain();
+
+        src.buffer = music.noise;
+        filter.type = "bandpass";
+        filter.frequency.setValueAtTime(1600 + i * 260, t);
+        filter.Q.value = .8;
+      gain.gain.setValueAtTime(.24, t);
+        gain.gain.exponentialRampToValueAtTime(.001, t + .13);
+
+        src.connect(filter);
+        filter.connect(gain);
+        gain.connect(music.master);
+        src.start(t);
+        src.stop(t + .16);
+      }
+    }
+
+    function playHat(time, open) {
+      const src = music.context.createBufferSource();
+      const filter = music.context.createBiquadFilter();
+      const gain = music.context.createGain();
+      const length = open ? .17 : .045;
+
+      src.buffer = music.noise;
+      filter.type = "highpass";
+      filter.frequency.setValueAtTime(open ? 6200 : 7600, time);
+      gain.gain.setValueAtTime(open ? .18 : .11, time);
+      gain.gain.exponentialRampToValueAtTime(.001, time + length);
+
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(music.master);
+      src.start(time);
+      src.stop(time + length + .02);
+    }
+
+    function playBass(time, frequency) {
+      const osc = music.context.createOscillator();
+      const filter = music.context.createBiquadFilter();
+      const gain = music.context.createGain();
+
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(frequency, time);
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(320, time);
+      filter.Q.value = 5;
+      gain.gain.setValueAtTime(.001, time);
+      gain.gain.linearRampToValueAtTime(.23, time + .018);
+      gain.gain.exponentialRampToValueAtTime(.001, time + .22);
+
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(music.master);
+      osc.start(time);
+      osc.stop(time + .24);
+    }
+
+    function getShareText() {
+      const nickname = getLockedNickname() || state.nickname;
+      const intro = nickname ? `${nickname} ti sfida a Discotti Pong!` : "Ti sfido a Discotti Pong!";
+      return `${intro} Fai rimbalzare il biscotto con la cassa audio: ${getCleanUrl()}`;
+    }
+
+    async function shareGame(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      saveNickname(false);
+      const url = getCleanUrl();
+      const text = getShareText();
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: "Discotti Pong", text, url });
+          return;
+        } catch (error) {
+          if (error && error.name === "AbortError") return;
+        }
+      }
+
+      window.location.href = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    }
+
+    function resize() {
+      const bounds = game.getBoundingClientRect();
+      state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      state.width = bounds.width;
+      state.height = bounds.height;
+      canvas.width = Math.floor(state.width * state.dpr);
+      canvas.height = Math.floor(state.height * state.dpr);
+      canvas.style.width = state.width + "px";
+      canvas.style.height = state.height + "px";
+      ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+
+      state.cookie.r = clamp(state.width * .047, 15, 25);
+      state.speaker.baseW = clamp(state.width * .3, 92, 138);
+      state.speaker.h = clamp(state.width * .075, 24, 34);
+      state.speaker.y = state.height - Math.max(88, state.height * .13);
+      applyDifficulty();
+      state.speaker.x = clamp(state.speaker.x || state.width / 2, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
+      state.speaker.targetX = state.speaker.x;
+
+      if (!state.running && state.cookie.x === 0 && state.cookie.y === 0) {
+        state.cookie.x = state.width / 2;
+        state.cookie.y = state.height * .44;
+      }
+
+      if (!state.running) {
+        requestAnimationFrame(() => {
+          drawBackground();
+          drawSpeaker();
+          drawCookie();
+        });
+      }
+    }
+
+    function reset() {
+      state.score = 0;
+      state.level = 1;
+      state.elapsed = 0;
+      state.shake = 0;
+      scoreEl.textContent = "0";
+      levelEl.textContent = "1";
+      applyDifficulty();
+      state.cookie.x = state.width / 2;
+      state.cookie.y = state.height * .45;
+      state.cookie.vx = (Math.random() < .5 ? -1 : 1) * rand(Math.max(145, state.width * .38), Math.max(230, state.width * .68));
+      state.cookie.vy = -Math.max(280, state.height * .38);
+      state.cookie.spin = 0;
+      state.speaker.x = state.width / 2;
+      state.speaker.targetX = state.speaker.x;
+      state.last = performance.now();
+    }
+
+    function start() {
+      if (state.running) return;
+      if (!saveNickname(true)) return;
+      overlay.classList.remove("mode-welcome", "mode-nickname", "is-game-over");
+      overlay.classList.add("hidden");
+      reset();
+      state.running = true;
+      startSoundtrack();
+      requestAnimationFrame(loop);
+    }
+
+    function gameOver() {
+      state.running = false;
+      stopSoundtrack();
+      setOverlayMode("gameover");
+      overlay.classList.remove("hidden");
+      submitScore();
+    }
+
+    function getDifficulty() {
+      const level = clamp(Math.floor(state.score / 5) + 1, 1, 7);
+      return {
+        level,
+        speed: 1 + Math.min(state.score, 70) * .014 + (level - 1) * .025,
+        paddleScale: Math.max(.62, 1 - Math.min(state.score, 50) * .008),
+        curve: state.score < 4 ? 0 : Math.min(118, (state.score - 3) * 4.2),
+        wallChaos: Math.min(76, 24 + (level - 1) * 8),
+        impactBoost: 235 + level * 24,
+        minSideSpeed: 145 + level * 12
+      };
+    }
+
+    function applyDifficulty() {
+      const difficulty = getDifficulty();
+      state.level = difficulty.level;
+      state.speaker.w = state.speaker.baseW * difficulty.paddleScale;
+      state.speaker.x = clamp(state.speaker.x || state.width / 2, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
+      state.speaker.targetX = clamp(state.speaker.targetX || state.speaker.x, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
+      levelEl.textContent = difficulty.level;
+      return difficulty;
+    }
+
+    function setSpeakerFromClientX(clientX) {
+      const bounds = game.getBoundingClientRect();
+      const localX = clientX - bounds.left;
+      state.speaker.targetX = clamp(localX, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
+    }
+
+    function setSpeakerFromTouch(event) {
+      if (isInteractiveTarget(event.target)) return;
+      const touch = event.touches[0] || event.changedTouches[0];
+      if (!touch) return;
+      setSpeakerFromClientX(touch.clientX);
+      event.preventDefault();
+    }
+
+    function handleStartInput(event) {
+      if (event.target && event.target.closest && event.target.closest("input, #shareButton")) return;
+      event.preventDefault();
+      if (state.overlayMode === "welcome") {
+        if (isNicknameLocked()) {
+          start();
+          return;
+        }
+        setOverlayMode("nickname");
+        return;
+      }
+      if (state.overlayMode === "nickname" && performance.now() < state.inputReadyAt) return;
+      start();
+    }
+
+    function isInteractiveTarget(target) {
+      return target && target.closest && target.closest("input, button, textarea, select, label");
+    }
+
+    window.addEventListener("resize", resize);
+    window.addEventListener("pointermove", (event) => setSpeakerFromClientX(event.clientX), { passive: true });
+    window.addEventListener("pointerdown", (event) => {
+      setSpeakerFromClientX(event.clientX);
+      if (!state.running && overlay.classList.contains("hidden")) start();
+    }, { passive: true });
+    window.addEventListener("touchstart", setSpeakerFromTouch, { passive: false });
+    window.addEventListener("touchmove", setSpeakerFromTouch, { passive: false });
+    startButton.addEventListener("pointerdown", handleStartInput);
+    startButton.addEventListener("touchstart", handleStartInput, { passive: false });
+    startButton.addEventListener("click", handleStartInput);
+    shareButton.addEventListener("pointerdown", (event) => event.stopPropagation());
+    shareButton.addEventListener("touchstart", (event) => event.stopPropagation(), { passive: true });
+    shareButton.addEventListener("click", shareGame);
+    nicknameInput.addEventListener("input", () => {
+      saveHint.textContent = isNicknameLocked() ? "Il nickname e bloccato su questo telefono." : "Sceglilo bene: poi resta quello.";
+    });
+    overlay.addEventListener("pointerdown", handleStartInput);
+    overlay.addEventListener("touchstart", handleStartInput, { passive: false });
+    overlay.addEventListener("click", handleStartInput);
+
+    function update(dt) {
+      const cookie = state.cookie;
+      const speaker = state.speaker;
+      const difficulty = applyDifficulty();
+      const speedScale = difficulty.speed;
+
+      state.elapsed += dt;
+      speaker.x += (speaker.targetX - speaker.x) * Math.min(1, dt * 18);
+      if (difficulty.curve) {
+        const wave = Math.sin(state.elapsed * (1.45 + difficulty.level * .22));
+        cookie.vx = clamp(cookie.vx + wave * difficulty.curve * dt, -560, 560);
+      }
+      cookie.x += cookie.vx * speedScale * dt;
+      cookie.y += cookie.vy * speedScale * dt;
+      cookie.spin += cookie.vx * dt * .018;
+      state.shake = Math.max(0, state.shake - dt * 18);
+
+      if (cookie.x < cookie.r + 10) {
+        cookie.x = cookie.r + 10;
+        cookie.vx = Math.abs(cookie.vx);
+        cookie.vy += rand(-difficulty.wallChaos, difficulty.wallChaos);
+      }
+
+      if (cookie.x > state.width - cookie.r - 10) {
+        cookie.x = state.width - cookie.r - 10;
+        cookie.vx = -Math.abs(cookie.vx);
+        cookie.vy += rand(-difficulty.wallChaos, difficulty.wallChaos);
+      }
+
+      if (cookie.y < cookie.r + 54) {
+        cookie.y = cookie.r + 54;
+        cookie.vy = Math.abs(cookie.vy);
+      }
+
+      const halfW = speaker.w / 2;
+      const top = speaker.y - speaker.h / 2;
+      const hitX = cookie.x > speaker.x - halfW - cookie.r && cookie.x < speaker.x + halfW + cookie.r;
+      const hitY = cookie.y + cookie.r > top && cookie.y - cookie.r < speaker.y + speaker.h / 2;
+
+      if (cookie.vy > 0 && hitX && hitY) {
+        let impact = (cookie.x - speaker.x) / halfW;
+        if (Math.abs(impact) < .16) {
+          impact = (Math.random() < .5 ? -1 : 1) * rand(.18, .32);
+        }
+        cookie.y = top - cookie.r;
+        cookie.vy = -Math.max(310, Math.abs(cookie.vy) + 10);
+        cookie.vx += impact * difficulty.impactBoost;
+        if (Math.abs(cookie.vx) < difficulty.minSideSpeed) {
+          cookie.vx = Math.sign(cookie.vx || impact) * difficulty.minSideSpeed;
+        }
+        cookie.vx = clamp(cookie.vx, -520, 520);
+        state.score += 1;
+        state.shake = .8;
+        scoreEl.textContent = state.score;
+
+        if (state.score > state.best) {
+          state.best = state.score;
+          bestEl.textContent = state.best;
+          localStorage.setItem("discotti-pong-best", String(state.best));
+        }
+      }
+
+      if (cookie.y - cookie.r > state.height) gameOver();
+    }
+
+    function drawBackground() {
+      const bg = ctx.createLinearGradient(0, 0, 0, state.height);
+      bg.addColorStop(0, "#ffffff");
+      bg.addColorStop(.52, "#f8fbff");
+      bg.addColorStop(1, "#eaf1ff");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, state.width, state.height);
+
+      if (logo.complete && logo.naturalWidth) {
+        const size = Math.min(Math.max(state.width * .82, 270), state.height * .64);
+        const x = (state.width - size) / 2 - state.width * .035;
+        const y = state.height * .43 - size / 2;
+        ctx.save();
+        ctx.globalAlpha = .16;
+        ctx.drawImage(logo, x, y, size, size);
+        ctx.restore();
+      }
+
+      ctx.strokeStyle = "rgba(11, 42, 146, .22)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(10, 60, state.width - 20, state.height - 132);
+    }
+
+    function drawCookie() {
+      const c = state.cookie;
+      ctx.save();
+      ctx.translate(c.x + rand(-state.shake, state.shake), c.y + rand(-state.shake, state.shake));
+      ctx.rotate(c.spin);
+
+      const grad = ctx.createRadialGradient(-c.r * .35, -c.r * .45, c.r * .2, 0, 0, c.r);
+      grad.addColorStop(0, "#ffd98b");
+      grad.addColorStop(.72, "#c98636");
+      grad.addColorStop(1, "#8f5424");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, c.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#583019";
+      const chips = [[-.42, -.28, .18], [.16, -.38, .15], [.42, .05, .17], [-.1, .18, .14], [-.38, .38, .13], [.17, .42, .12]];
+      chips.forEach(([x, y, r]) => {
+        ctx.beginPath();
+        ctx.arc(x * c.r, y * c.r, r * c.r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.strokeStyle = "rgba(255, 244, 204, .55)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, c.r - 3, .25, Math.PI * 1.34);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawSpeaker() {
+      const s = state.speaker;
+      const x = s.x - s.w / 2;
+      const y = s.y - s.h / 2;
+
+      ctx.save();
+      ctx.translate(rand(-state.shake, state.shake), rand(-state.shake, state.shake));
+
+      ctx.fillStyle = "#2a2d31";
+      roundRect(x, y, s.w, s.h, 8);
+      ctx.fill();
+
+      ctx.fillStyle = "#111315";
+      roundRect(x + 8, y + 5, s.w - 16, s.h - 10, 5);
+      ctx.fill();
+
+      const coneR = s.h * .34;
+      drawCone(x + s.w * .32, s.y, coneR);
+      drawCone(x + s.w * .68, s.y, coneR);
+
+      ctx.fillStyle = "#d7dce4";
+      roundRect(s.x - s.w * .18, y - 5, s.w * .36, 5, 4);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawCone(x, y, r) {
+      ctx.fillStyle = "#3d444a";
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#151719";
+      ctx.beginPath();
+      ctx.arc(x, y, r * .58, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 255, 255, .2)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(x, y, r * .82, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    function roundRect(x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function loop(now) {
+      if (!state.running) return;
+      const dt = Math.min((now - state.last) / 1000, .033);
+      state.last = now;
+      update(dt);
+      drawBackground();
+      drawSpeaker();
+      drawCookie();
+      requestAnimationFrame(loop);
+    }
+
+    resize();
+    loadLeaderboard();
+    drawBackground();
+    drawSpeaker();
+    drawCookie();
+  </script>
+</body>
+</html>
