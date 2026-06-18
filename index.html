@@ -309,6 +309,26 @@
       text-align: right;
     }
 
+    .leaderboard-row.is-player {
+      border-radius: 6px;
+      background: rgba(11, 42, 146, .08);
+      padding: 0 4px;
+    }
+
+    .challenge {
+      display: none;
+      margin: 4px 0 12px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 900;
+      line-height: 1.3;
+    }
+
+    .overlay.is-game-over .challenge {
+      display: block;
+      order: 2;
+    }
+
     .overlay.mode-welcome .nickname-label,
     .overlay.mode-welcome input,
     .overlay.mode-welcome .hint,
@@ -324,8 +344,7 @@
 
     .overlay.is-game-over .nickname-label,
     .overlay.is-game-over input,
-    .overlay.is-game-over .hint,
-    .overlay.is-game-over #shareButton {
+    .overlay.is-game-over .hint {
       display: none;
     }
 
@@ -355,7 +374,7 @@
       </div>
       <div class="stats" aria-live="polite">
         <div class="pill"><span>Punti</span><b id="score">0</b></div>
-        <div class="pill"><span>Liv</span><b id="level">1</b></div>
+        <div class="pill"><span>Combo</span><b id="combo">0</b></div>
         <div class="pill"><span>Best</span><b id="best">0</b></div>
       </div>
     </header>
@@ -373,8 +392,9 @@
           <button id="shareButton" class="secondary" type="button">Condividi su WhatsApp</button>
         </div>
         <p class="hint" id="saveHint">Il nickname resta salvato su questo telefono.</p>
+        <p class="challenge" id="challengeText"></p>
         <div class="leaderboard" aria-live="polite">
-          <p class="leaderboard-title">Classifica</p>
+          <p class="leaderboard-title" id="leaderboardTitle">Classifica</p>
           <ol class="leaderboard-list" id="leaderboardList">
             <li class="leaderboard-row"><span class="leaderboard-rank">-</span><span class="leaderboard-name">Caricamento</span><span class="leaderboard-score">...</span></li>
           </ol>
@@ -388,7 +408,7 @@
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d", { alpha: false });
     const scoreEl = document.getElementById("score");
-    const levelEl = document.getElementById("level");
+    const comboEl = document.getElementById("combo");
     const bestEl = document.getElementById("best");
     const overlay = document.getElementById("overlay");
     const overlayTitle = document.getElementById("overlayTitle");
@@ -398,6 +418,8 @@
     const nicknameInput = document.getElementById("nicknameInput");
     const playerBadge = document.getElementById("playerBadge");
     const saveHint = document.getElementById("saveHint");
+    const challengeText = document.getElementById("challengeText");
+    const leaderboardTitle = document.getElementById("leaderboardTitle");
     const leaderboardList = document.getElementById("leaderboardList");
     const logo = new Image();
     logo.src = "DiscottiLogo-bg.png";
@@ -410,6 +432,12 @@
       running: false,
       score: 0,
       level: 1,
+      combo: 0,
+      bestCombo: 0,
+      perfects: 0,
+      bassDropUntil: 0,
+      flashText: "",
+      flashUntil: 0,
       best: Number(localStorage.getItem("discotti-pong-best") || 0),
       nickname: localStorage.getItem("discotti-pong-nickname") || "",
       leaderboard: [],
@@ -444,7 +472,7 @@
     const rand = (min, max) => min + Math.random() * (max - min);
 
     bestEl.textContent = state.best;
-    levelEl.textContent = state.level;
+    comboEl.textContent = state.combo;
     nicknameInput.value = state.nickname;
     updateNicknameUI();
     setOverlayMode("welcome");
@@ -501,25 +529,61 @@
 
       if (mode === "gameover") {
         overlay.classList.add("is-game-over");
-        overlayTitle.textContent = "Classifica generale";
-        overlayText.textContent = state.nickname ? `${state.nickname}, hai fatto ${state.score} punti.` : `Hai fatto ${state.score} punti.`;
-        startButton.textContent = "Rigioca";
+        overlayTitle.textContent = "Classifica di oggi";
+        overlayText.textContent = `${state.score} punti - combo ${state.bestCombo} - perfect ${state.perfects}`;
+        challengeText.textContent = "Aggiorno la classifica...";
+        startButton.textContent = "Riprova";
       }
     }
 
-    function renderLeaderboard(rows, offline) {
+    function renderLeaderboard(rows, offline, period = "today") {
+      leaderboardTitle.textContent = period === "today" ? "Classifica di oggi" : "Classifica generale";
       const list = rows && rows.length ? rows : [{ nickname: "Nessun punteggio", score: 0 }];
       leaderboardList.innerHTML = list.slice(0, 8).map((row, index) => `
-        <li class="leaderboard-row">
+        <li class="leaderboard-row${row.nickname === state.nickname ? " is-player" : ""}">
           <span class="leaderboard-rank">${rows && rows.length ? index + 1 : "-"}</span>
           <span class="leaderboard-name">${escapeHtml(row.nickname || "Player")}</span>
           <span class="leaderboard-score">${Number(row.score || 0)}</span>
         </li>
       `).join("");
 
+      updateChallengeText(rows || []);
+
       if (offline) {
         saveHint.textContent = "Classifica locale: server non raggiungibile.";
       }
+    }
+
+    function updateChallengeText(rows) {
+      if (state.overlayMode !== "gameover") return;
+
+      const playerIndex = rows.findIndex((row) => row.nickname === state.nickname);
+      if (!rows.length) {
+        challengeText.textContent = "Primo punteggio della giornata. Adesso fatti superare.";
+        startButton.textContent = "Riprova";
+        return;
+      }
+
+      if (playerIndex === 0) {
+        challengeText.textContent = "Sei primo oggi. Ora difendi il posto.";
+        startButton.textContent = "Difendi il primo posto";
+        return;
+      }
+
+      if (playerIndex > 0) {
+        const target = rows[playerIndex - 1];
+        const missing = Number(target.score || 0) - state.score + 1;
+        challengeText.textContent = `Sei #${playerIndex + 1}. Ti mancano ${missing} punti per superare ${target.nickname}.`;
+        startButton.textContent = `Supera ${target.nickname}`;
+        return;
+      }
+
+      const last = rows[rows.length - 1];
+      const missing = Math.max(1, Number(last.score || 0) - state.score + 1);
+      challengeText.textContent = rows.length >= 8
+        ? `Ti mancano ${missing} punti per entrare in top 8 oggi.`
+        : "Non sei ancora in classifica oggi. Basta una run pulita.";
+      startButton.textContent = "Entra in classifica";
     }
 
     function escapeHtml(value) {
@@ -544,7 +608,7 @@
       const existing = getLocalLeaderboard().find((row) => row.nickname === nickname);
       const bestScore = Math.max(score, Number(existing && existing.score) || 0);
       const rows = getLocalLeaderboard().filter((row) => row.nickname !== nickname);
-      rows.push({ nickname, score: bestScore, at: Date.now() });
+      rows.push({ nickname, score: bestScore, best_combo: state.bestCombo, perfects: state.perfects, at: Date.now() });
       rows.sort((a, b) => b.score - a.score || a.at - b.at);
       localStorage.setItem("discotti-pong-local-leaderboard", JSON.stringify(rows.slice(0, 8)));
       return rows.slice(0, 8);
@@ -553,19 +617,19 @@
     async function loadLeaderboard() {
       if (!hasLeaderboardApi()) {
         state.leaderboard = getLocalLeaderboard();
-        renderLeaderboard(state.leaderboard, true);
+        renderLeaderboard(state.leaderboard, true, "today");
         return;
       }
 
       try {
-        const response = await fetch(apiUrl("/api/leaderboard"), { cache: "no-store" });
+        const response = await fetch(apiUrl("/api/leaderboard?period=today"), { cache: "no-store" });
         if (!response.ok) throw new Error("leaderboard unavailable");
         const data = await response.json();
         state.leaderboard = Array.isArray(data.scores) ? data.scores : [];
-        renderLeaderboard(state.leaderboard, false);
+        renderLeaderboard(state.leaderboard, false, "today");
       } catch (error) {
         state.leaderboard = getLocalLeaderboard();
-        renderLeaderboard(state.leaderboard, true);
+        renderLeaderboard(state.leaderboard, true, "today");
       }
     }
 
@@ -578,7 +642,7 @@
 
       if (!hasLeaderboardApi()) {
         state.leaderboard = localRows;
-        renderLeaderboard(localRows, true);
+        renderLeaderboard(localRows, true, "today");
         return;
       }
 
@@ -586,15 +650,20 @@
         const response = await fetch(apiUrl("/api/score"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ nickname: state.nickname, score: state.score })
+          body: JSON.stringify({
+            nickname: state.nickname,
+            score: state.score,
+            bestCombo: state.bestCombo,
+            perfects: state.perfects
+          })
         });
         if (!response.ok) throw new Error("score rejected");
         const data = await response.json();
         state.leaderboard = Array.isArray(data.scores) ? data.scores : localRows;
-        renderLeaderboard(state.leaderboard, false);
+        renderLeaderboard(state.leaderboard, false, "today");
       } catch (error) {
         state.leaderboard = localRows;
-        renderLeaderboard(localRows, true);
+        renderLeaderboard(localRows, true, "today");
       }
     }
 
@@ -780,8 +849,13 @@
 
     function getShareText() {
       const nickname = getLockedNickname() || state.nickname;
+      if (state.score > 0) {
+        const name = nickname || "Io";
+        return `${name} ha fatto ${state.score} punti a Discotti Pong. Superami se ci riesci: ${getCleanUrl()}`;
+      }
+
       const intro = nickname ? `${nickname} ti sfida a Discotti Pong!` : "Ti sfido a Discotti Pong!";
-      return `${intro} Fai rimbalzare il biscotto con la cassa audio: ${getCleanUrl()}`;
+      return `${intro} Fai piu punti di me: ${getCleanUrl()}`;
     }
 
     async function shareGame(event) {
@@ -839,10 +913,16 @@
     function reset() {
       state.score = 0;
       state.level = 1;
+      state.combo = 0;
+      state.bestCombo = 0;
+      state.perfects = 0;
+      state.bassDropUntil = 0;
+      state.flashText = "";
+      state.flashUntil = 0;
       state.elapsed = 0;
       state.shake = 0;
       scoreEl.textContent = "0";
-      levelEl.textContent = "1";
+      comboEl.textContent = "0";
       applyDifficulty();
       state.cookie.x = state.width / 2;
       state.cookie.y = state.height * .45;
@@ -886,13 +966,16 @@
       };
     }
 
+    function isBassDropActive() {
+      return performance.now() < state.bassDropUntil;
+    }
+
     function applyDifficulty() {
       const difficulty = getDifficulty();
       state.level = difficulty.level;
       state.speaker.w = state.speaker.baseW * difficulty.paddleScale;
       state.speaker.x = clamp(state.speaker.x || state.width / 2, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
       state.speaker.targetX = clamp(state.speaker.targetX || state.speaker.x, state.speaker.w / 2 + 10, state.width - state.speaker.w / 2 - 10);
-      levelEl.textContent = difficulty.level;
       return difficulty;
     }
 
@@ -990,7 +1073,9 @@
       const hitY = cookie.y + cookie.r > top && cookie.y - cookie.r < speaker.y + speaker.h / 2;
 
       if (cookie.vy > 0 && hitX && hitY) {
-        let impact = (cookie.x - speaker.x) / halfW;
+        const rawImpact = (cookie.x - speaker.x) / halfW;
+        const perfect = Math.abs(rawImpact) <= .18;
+        let impact = rawImpact;
         if (Math.abs(impact) < .16) {
           impact = (Math.random() < .5 ? -1 : 1) * rand(.18, .32);
         }
@@ -1001,9 +1086,26 @@
           cookie.vx = Math.sign(cookie.vx || impact) * difficulty.minSideSpeed;
         }
         cookie.vx = clamp(cookie.vx, -520, 520);
-        state.score += 1;
+        state.combo += 1;
+        state.bestCombo = Math.max(state.bestCombo, state.combo);
+        if (perfect) state.perfects += 1;
+
+        let gained = perfect ? 2 : 1;
+        if (state.combo % 5 === 0) gained += 1;
+        if (isBassDropActive()) gained *= 2;
+        state.score += gained;
         state.shake = .8;
+        comboEl.textContent = state.combo;
         scoreEl.textContent = state.score;
+        state.flashText = perfect ? `PERFECT +${gained}` : `+${gained}`;
+        state.flashUntil = performance.now() + 620;
+
+        if (state.combo > 0 && state.combo % 12 === 0) {
+          state.bassDropUntil = performance.now() + 6500;
+          state.flashText = "BASS DROP";
+          state.flashUntil = performance.now() + 900;
+          state.shake = 1.8;
+        }
 
         if (state.score > state.best) {
           state.best = state.score;
@@ -1017,9 +1119,10 @@
 
     function drawBackground() {
       const bg = ctx.createLinearGradient(0, 0, 0, state.height);
-      bg.addColorStop(0, "#ffffff");
+      const bass = isBassDropActive() ? .12 + Math.sin(state.elapsed * 18) * .05 : 0;
+      bg.addColorStop(0, bass ? "#eef4ff" : "#ffffff");
       bg.addColorStop(.52, "#f8fbff");
-      bg.addColorStop(1, "#eaf1ff");
+      bg.addColorStop(1, bass ? "#d6e4ff" : "#eaf1ff");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, state.width, state.height);
 
@@ -1036,6 +1139,29 @@
       ctx.strokeStyle = "rgba(11, 42, 146, .22)";
       ctx.lineWidth = 2;
       ctx.strokeRect(10, 60, state.width - 20, state.height - 132);
+
+      if (bass) {
+        ctx.save();
+        ctx.globalAlpha = bass;
+        ctx.fillStyle = "#0b2a92";
+        ctx.fillRect(0, 0, state.width, state.height);
+        ctx.restore();
+      }
+    }
+
+    function drawFlashText() {
+      const remaining = state.flashUntil - performance.now();
+      if (remaining <= 0 || !state.flashText) return;
+
+      ctx.save();
+      ctx.globalAlpha = clamp(remaining / 500, 0, 1);
+      ctx.fillStyle = "#0b2a92";
+      ctx.font = "900 24px Inter, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.shadowColor = "rgba(255,255,255,.9)";
+      ctx.shadowBlur = 10;
+      ctx.fillText(state.flashText, state.width / 2, Math.max(118, state.height * .24));
+      ctx.restore();
     }
 
     function drawCookie() {
@@ -1129,6 +1255,7 @@
       drawBackground();
       drawSpeaker();
       drawCookie();
+      drawFlashText();
       requestAnimationFrame(loop);
     }
 
@@ -1137,6 +1264,7 @@
     drawBackground();
     drawSpeaker();
     drawCookie();
+    drawFlashText();
   </script>
 </body>
 </html>
