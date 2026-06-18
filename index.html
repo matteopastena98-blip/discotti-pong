@@ -66,8 +66,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding: max(12px, env(safe-area-inset-top)) 14px 10px;
+      gap: 8px;
+      padding: max(12px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 10px max(10px, env(safe-area-inset-left));
       pointer-events: none;
     }
 
@@ -90,7 +90,7 @@
       font-weight: 900;
       letter-spacing: 0;
       text-transform: uppercase;
-      font-size: clamp(18px, 5vw, 30px);
+      font-size: clamp(16px, 4.7vw, 28px);
       color: var(--ink);
       text-shadow: 0 2px 0 rgba(255, 255, 255, .9);
       white-space: nowrap;
@@ -98,6 +98,7 @@
 
     .title-block {
       min-width: 0;
+      flex: 1 1 auto;
     }
 
     .player {
@@ -115,19 +116,19 @@
     .stats {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 5px;
       flex-shrink: 0;
     }
 
     .pill {
-      min-width: 58px;
-      padding: 7px 10px;
+      min-width: 50px;
+      padding: 6px 7px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: rgba(255, 255, 255, .86);
       text-align: center;
       font-weight: 800;
-      font-size: 15px;
+      font-size: 14px;
       line-height: 1;
       box-shadow: 0 8px 24px rgba(11, 42, 146, .08), inset 0 1px rgba(255, 255, 255, .9);
     }
@@ -139,6 +140,18 @@
       font-size: 9px;
       font-weight: 700;
       text-transform: uppercase;
+    }
+
+    @media (max-width: 370px) {
+      .brand { font-size: 15px; }
+      .player { max-width: 116px; font-size: 10px; }
+      .stats { gap: 4px; }
+      .pill {
+        min-width: 44px;
+        padding: 5px 5px;
+        font-size: 13px;
+      }
+      .pill span { font-size: 8px; }
     }
 
     canvas {
@@ -424,6 +437,7 @@
     const logo = new Image();
     logo.src = "DiscottiLogo-bg.png";
     const leaderboardApiBase = "https://discotti-pong-leaderboard.discotti-pong-matteopastena98-blip.workers.dev";
+    const horseSpriteCache = new Map();
 
     const state = {
       width: 0,
@@ -435,15 +449,34 @@
       combo: 0,
       bestCombo: 0,
       perfects: 0,
+      nonPerfectStreak: 0,
+      horsePointCarry: 0,
       bassDropUntil: 0,
+      bassBoost: null,
+      nextBassAt: 30,
       cornerStreak: 0,
+      cornerChainUntil: 0,
+      cornerPulseUntil: 0,
+      cornerPulseSide: "",
+      cornerBurstUntil: 0,
+      cornerBurstSide: "",
       slowUntil: 0,
-      honeyUntil: 0,
+      milkUntil: 0,
+      milkCharges: 0,
       doubleUntil: 0,
-      splitAtScore: 24,
+      delayUntil: 0,
+      splitAtScore: 35,
       splitCookies: null,
+      splitMerge: null,
+      lsdUntil: 0,
+      nextLsdAtScore: 48,
+      lsdDecoys: [],
+      horseUntil: 0,
+      horseFadeUntil: 0,
+      horseHorde: [],
+      majorEventCooldownUntil: 0,
       perk: null,
-      nextPerkAt: 8,
+      nextPerkAt: 16,
       flashText: "",
       flashUntil: 0,
       best: Number(localStorage.getItem("discotti-pong-best") || 0),
@@ -454,7 +487,7 @@
       last: 0,
       elapsed: 0,
       shake: 0,
-      cookie: { x: 0, y: 0, r: 18, vx: 220, vy: -320, spin: 0 },
+      cookie: { x: 0, y: 0, r: 18, vx: 220, vy: -320, spin: 0, cornerArmed: false },
       speaker: { x: 0, y: 0, baseW: 108, w: 108, h: 28, targetX: 0 }
     };
 
@@ -855,6 +888,62 @@
       osc.stop(time + .24);
     }
 
+    function playHorseNeigh() {
+      const ctx = music.context || ensureMusic();
+      if (!ctx || !music.master) return;
+      ctx.resume();
+
+      const time = ctx.currentTime + .01;
+      const out = ctx.createGain();
+      out.gain.setValueAtTime(.001, time);
+      out.gain.linearRampToValueAtTime(.26, time + .035);
+      out.gain.exponentialRampToValueAtTime(.001, time + .72);
+      out.connect(music.master);
+
+      for (let i = 0; i < 2; i += 1) {
+        const osc = ctx.createOscillator();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+        const t = time + i * .07;
+
+        osc.type = i ? "triangle" : "sawtooth";
+        osc.frequency.setValueAtTime(520 + i * 80, t);
+        osc.frequency.linearRampToValueAtTime(780 + i * 110, t + .12);
+        osc.frequency.exponentialRampToValueAtTime(240 + i * 45, t + .48);
+        filter.type = "bandpass";
+        filter.frequency.setValueAtTime(980 + i * 220, t);
+        filter.Q.value = 5.5;
+        gain.gain.setValueAtTime(.001, t);
+        gain.gain.linearRampToValueAtTime(.16, t + .04);
+        gain.gain.exponentialRampToValueAtTime(.001, t + .55);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(out);
+        osc.start(t);
+        osc.stop(t + .58);
+      }
+
+      if (music.noise) {
+        const src = ctx.createBufferSource();
+        const filter = ctx.createBiquadFilter();
+        const gain = ctx.createGain();
+        src.buffer = music.noise;
+        filter.type = "bandpass";
+        filter.frequency.setValueAtTime(1450, time);
+        filter.frequency.exponentialRampToValueAtTime(760, time + .44);
+        filter.Q.value = 4;
+        gain.gain.setValueAtTime(.001, time);
+        gain.gain.linearRampToValueAtTime(.06, time + .05);
+        gain.gain.exponentialRampToValueAtTime(.001, time + .46);
+        src.connect(filter);
+        filter.connect(gain);
+        gain.connect(out);
+        src.start(time);
+        src.stop(time + .5);
+      }
+    }
+
     function getShareText() {
       const nickname = getLockedNickname() || state.nickname;
       if (state.score > 0) {
@@ -912,6 +1001,9 @@
       if (!state.running) {
         requestAnimationFrame(() => {
           drawBackground();
+          drawHorseHorde();
+          drawPerk();
+          drawBassBoost();
           drawSpeaker();
           drawCookie();
         });
@@ -924,15 +1016,34 @@
       state.combo = 0;
       state.bestCombo = 0;
       state.perfects = 0;
+      state.nonPerfectStreak = 0;
+      state.horsePointCarry = 0;
       state.bassDropUntil = 0;
+      state.bassBoost = null;
+      state.nextBassAt = 30;
       state.cornerStreak = 0;
+      state.cornerChainUntil = 0;
+      state.cornerPulseUntil = 0;
+      state.cornerPulseSide = "";
+      state.cornerBurstUntil = 0;
+      state.cornerBurstSide = "";
       state.slowUntil = 0;
-      state.honeyUntil = 0;
+      state.milkUntil = 0;
+      state.milkCharges = 0;
       state.doubleUntil = 0;
-      state.splitAtScore = 24;
+      state.delayUntil = 0;
+      state.splitAtScore = 35;
       state.splitCookies = null;
+      state.splitMerge = null;
+      state.lsdUntil = 0;
+      state.nextLsdAtScore = 48;
+      state.lsdDecoys = [];
+      state.horseUntil = 0;
+      state.horseFadeUntil = 0;
+      state.horseHorde = [];
+      state.majorEventCooldownUntil = 0;
       state.perk = null;
-      state.nextPerkAt = 8;
+      state.nextPerkAt = 16;
       state.flashText = "";
       state.flashUntil = 0;
       state.elapsed = 0;
@@ -945,6 +1056,7 @@
       state.cookie.vx = (Math.random() < .5 ? -1 : 1) * rand(Math.max(145, state.width * .38), Math.max(230, state.width * .68));
       state.cookie.vy = -Math.max(280, state.height * .38);
       state.cookie.spin = 0;
+      state.cookie.cornerArmed = false;
       state.speaker.x = state.width / 2;
       state.speaker.targetX = state.speaker.x;
       state.last = performance.now();
@@ -990,16 +1102,37 @@
       return performance.now() < state.slowUntil;
     }
 
-    function isHoneyActive() {
-      return performance.now() < state.honeyUntil;
+    function isMilkActive() {
+      return performance.now() < state.milkUntil && state.milkCharges > 0;
     }
 
     function isDoubleActive() {
       return performance.now() < state.doubleUntil;
     }
 
+    function isDelayActive() {
+      return performance.now() < state.delayUntil;
+    }
+
+    function isLsdActive() {
+      return performance.now() < state.lsdUntil;
+    }
+
+    function isHorseActive() {
+      return performance.now() < state.horseUntil;
+    }
+
+    function isHorseVisible() {
+      return performance.now() < state.horseFadeUntil;
+    }
+
     function cookieRadius(cookie) {
-      return cookie.r * (isHoneyActive() ? 1.12 : 1);
+      return cookie.r;
+    }
+
+    function getPerfectHalfWidth() {
+      const s = state.speaker;
+      return clamp(s.w * .085, 6, 13);
     }
 
     function applyDifficulty() {
@@ -1068,17 +1201,28 @@
     function update(dt) {
       const speaker = state.speaker;
       const difficulty = applyDifficulty();
-      const speedScale = difficulty.speed * (isSlowActive() ? .76 : 1) * (isHoneyActive() ? .88 : 1);
+      const speedScale = difficulty.speed * (isSlowActive() ? .76 : 1);
 
       state.elapsed += dt;
       speaker.x += (speaker.targetX - speaker.x) * Math.min(1, dt * 18);
       state.shake = Math.max(0, state.shake - dt * 18);
+      updateCornerChain();
+      updateBassBoost(dt);
+      updateLsdDecoys(dt);
+      updateHorseHorde(dt);
       maybeSpawnPerk();
       maybeStartSplit();
+      maybeStartLsd();
+
+      if (state.splitMerge) {
+        updateSplitMerge();
+        return;
+      }
 
       const cookies = state.splitCookies || [state.cookie];
       for (const cookie of cookies) {
         updateCookie(cookie, dt, difficulty, speedScale);
+        checkBassBoostHit(cookie);
         checkPerkHit(cookie);
         if (cookie.y - cookieRadius(cookie) > state.height) {
           gameOver();
@@ -1094,7 +1238,7 @@
         cookie.vx = clamp(cookie.vx + wave * difficulty.curve * dt * .55, -560, 560);
       }
 
-      cookie.vy += (isHoneyActive() ? 24 : 34) * dt;
+      cookie.vy += 34 * dt;
       cookie.vx *= 1 - Math.min(.05, dt * .35);
       cookie.x += cookie.vx * speedScale * dt;
       cookie.y += cookie.vy * speedScale * dt;
@@ -1116,6 +1260,7 @@
         cookie.y = radius + 54;
         cookie.vy = Math.abs(cookie.vy) * .94;
         registerUpperCorner(cookie);
+        cookie.cornerArmed = false;
       }
 
       handleSpeakerHit(cookie, difficulty);
@@ -1132,7 +1277,7 @@
       if (cookie.vy <= 0 || !hitX || !hitY) return;
 
       const rawImpact = clamp((cookie.x - speaker.x) / halfW, -1.05, 1.05);
-      const perfect = Math.abs(rawImpact) <= .17;
+      const perfect = Math.abs(cookie.x - speaker.x) <= getPerfectHalfWidth();
       let impact = rawImpact;
       if (Math.abs(impact) < .12) {
         impact = Math.sign(cookie.vx || (Math.random() - .5)) * rand(.16, .28);
@@ -1143,31 +1288,63 @@
       const bounce = clamp(incoming * .64 + 185 + state.combo * 1.4, 315, 610);
       cookie.vy = -bounce * (perfect ? 1.04 : 1);
       cookie.vx = clamp(cookie.vx * .22 + impact * (difficulty.impactBoost + 85), -545, 545);
+      if (isMilkActive()) {
+        const direction = Math.sign(impact || cookie.vx || 1);
+        cookie.vx = clamp(cookie.vx * 1.18 + direction * 58, -620, 620);
+        cookie.vy *= 1.04;
+        cookie.spin += direction * .55;
+      }
       if (Math.abs(cookie.vx) < difficulty.minSideSpeed) {
         cookie.vx = Math.sign(cookie.vx || impact) * difficulty.minSideSpeed;
       }
       cookie.spin += impact * 1.25;
       cookie.touched = true;
+      cookie.cornerArmed = true;
       registerBounce(perfect);
     }
 
     function registerBounce(perfect) {
       state.combo += 1;
       state.bestCombo = Math.max(state.bestCombo, state.combo);
-      if (perfect) state.perfects += 1;
+      let horseJustTriggered = false;
+      if (perfect) {
+        state.perfects += 1;
+        state.nonPerfectStreak = 0;
+      } else {
+        state.nonPerfectStreak += 1;
+        if (state.nonPerfectStreak >= 5 && !isHorseActive()) {
+          triggerHorseMode();
+          horseJustTriggered = true;
+          state.nonPerfectStreak = 0;
+        }
+      }
 
       let gained = perfect ? 2 : 1;
       if (state.combo % 5 === 0) gained += 1;
       if (isBassDropActive() || isDoubleActive()) gained *= 2;
+      if (isMilkActive()) {
+        gained += 1;
+        state.milkCharges -= 1;
+        if (state.milkCharges <= 0) state.milkUntil = 0;
+      }
+      const rawGained = gained;
+      if (isHorseActive()) {
+        const halved = rawGained / 2 + state.horsePointCarry;
+        gained = Math.floor(halved);
+        state.horsePointCarry = halved - gained;
+      }
       addScore(gained);
       state.shake = perfect ? 1.2 : .75;
       comboEl.textContent = state.combo;
-      showFlash(perfect ? `PERFECT +${gained}` : `+${gained}`, perfect ? 760 : 520);
-
-      if (state.combo > 0 && state.combo % 12 === 0) triggerBassDrop();
+      const shownGain = isHorseActive() && rawGained === 1 ? "+1/2" : `+${gained}`;
+      if (horseJustTriggered) {
+        showFlash("CAVALLO: PUNTI /2", 1050);
+      } else {
+        showFlash(perfect ? `PERFECT ${shownGain}` : shownGain, perfect ? 760 : 520);
+      }
 
       if (state.splitCookies && state.splitCookies.every((cookie) => cookie.touched)) {
-        triggerSplitFinale(state.width / 2, state.cookie.r + 72);
+        startSplitMerge();
       }
     }
 
@@ -1187,40 +1364,131 @@
       state.flashUntil = performance.now() + duration;
     }
 
+    function blockMajorEvents(ms) {
+      state.majorEventCooldownUntil = Math.max(state.majorEventCooldownUntil, performance.now() + ms);
+    }
+
+    function majorEventsReady() {
+      return performance.now() >= state.majorEventCooldownUntil;
+    }
+
     function triggerBassDrop() {
       state.bassDropUntil = performance.now() + 6500;
       state.shake = 1.8;
       showFlash("BASS DROP: PUNTI x2", 1100);
     }
 
-    function registerUpperCorner(cookie) {
-      const inUpperLeft = cookie.x < state.width * .25;
-      const inUpperRight = cookie.x > state.width * .75;
-      if (!inUpperLeft && !inUpperRight) {
-        state.cornerStreak = 0;
+    function updateBassBoost(dt) {
+      const boost = state.bassBoost;
+      if (!boost && state.elapsed >= state.nextBassAt && !state.splitCookies && !state.splitMerge) {
+        spawnBassBoost();
         return;
       }
 
-      state.cornerStreak += 1;
+      if (!boost) return;
+      if (performance.now() > boost.until) {
+        state.bassBoost = null;
+        state.nextBassAt = state.elapsed + 30;
+        return;
+      }
+
+      boost.x += boost.vx * dt;
+      boost.y += boost.vy * dt;
+      const minX = boost.r + 16;
+      const maxX = state.width - boost.r - 16;
+      const minY = 76;
+      const maxY = state.height * .58;
+
+      if (boost.x < minX || boost.x > maxX) {
+        boost.x = clamp(boost.x, minX, maxX);
+        boost.vx *= -1;
+      }
+
+      if (boost.y < minY || boost.y > maxY) {
+        boost.y = clamp(boost.y, minY, maxY);
+        boost.vy *= -1;
+      }
+    }
+
+    function spawnBassBoost() {
+      const angle = rand(-.8, .8);
+      const speed = rand(58, 82);
+      state.bassBoost = {
+        x: rand(state.width * .24, state.width * .76),
+        y: rand(state.height * .2, state.height * .46),
+        r: clamp(state.width * .024, 8, 11),
+        vx: Math.cos(angle) * speed * (Math.random() < .5 ? -1 : 1),
+        vy: Math.sin(angle) * speed,
+        until: performance.now() + 8500
+      };
+      showFlash("BASS BOOST", 720);
+    }
+
+    function checkBassBoostHit(cookie) {
+      const boost = state.bassBoost;
+      if (!boost) return;
+      const distance = Math.hypot(cookie.x - boost.x, cookie.y - boost.y);
+      if (distance > cookieRadius(cookie) + boost.r) return;
+
+      state.bassBoost = null;
+      state.nextBassAt = state.elapsed + 30;
+      triggerBassDrop();
+    }
+
+    function registerUpperCorner(cookie) {
+      if (!cookie.cornerArmed) return;
+      const leftPocket = getCornerPocket("left");
+      const rightPocket = getCornerPocket("right");
+      const hitLeft = Math.hypot(cookie.x - leftPocket.x, cookie.y - leftPocket.y) <= leftPocket.r;
+      const hitRight = Math.hypot(cookie.x - rightPocket.x, cookie.y - rightPocket.y) <= rightPocket.r;
+      if (!hitLeft && !hitRight) return;
+
+      const cornerGain = isDelayActive() ? 3 : 1;
+      state.cornerStreak += cornerGain;
+      state.cornerChainUntil = performance.now() + 10000;
+      state.cornerPulseSide = hitLeft ? "left" : "right";
+      state.cornerPulseUntil = performance.now() + 520;
+      cookie.vx += hitLeft ? Math.abs(cookie.vy) * .18 : -Math.abs(cookie.vy) * .18;
+      cookie.vy += 55;
       if (state.cornerStreak >= 5) {
+        state.cornerBurstSide = hitLeft ? "left" : "right";
+        state.cornerBurstUntil = performance.now() + 900;
         state.cornerStreak = 0;
-        addScore(8);
-        state.doubleUntil = performance.now() + 5500;
-        showFlash("ANGOLO +8 / x2", 950);
+        state.cornerChainUntil = 0;
+        addScore(10);
+        showFlash(isDelayActive() ? "DELAY ANGOLO +10" : "ANGOLO DISCOTTI +10", 950);
         state.shake = 2;
       }
     }
 
+    function updateCornerChain() {
+      if (state.cornerStreak > 0 && performance.now() > state.cornerChainUntil) {
+        state.cornerStreak = 0;
+        state.cornerChainUntil = 0;
+      }
+    }
+
+    function getCornerPocket(side) {
+      const visualR = clamp(state.width * .065, 23, 32);
+      const hitR = clamp(state.width * .105, 38, 50);
+      return {
+        x: side === "left" ? 8 : state.width - 8,
+        y: 53,
+        r: hitR,
+        visualR
+      };
+    }
+
     function maybeSpawnPerk() {
-      if (state.perk || state.score < state.nextPerkAt || state.splitCookies) return;
+      if (state.perk || state.score < state.nextPerkAt || state.splitCookies || state.splitMerge || isLsdActive() || !majorEventsReady()) return;
       state.perk = {
         x: rand(state.width * .22, state.width * .78),
         y: rand(state.height * .22, state.height * .48),
         r: clamp(state.width * .035, 12, 17),
-        type: ["honey", "slow", "bonus"][Math.floor(Math.random() * 3)],
-        until: performance.now() + 9000
+        type: ["milk", "slow", "bonus", "delay"][Math.floor(Math.random() * 4)],
+        until: performance.now() + 7600
       };
-      state.nextPerkAt += rand(10, 16);
+      state.nextPerkAt += rand(24, 34);
     }
 
     function checkPerkHit(cookie) {
@@ -1234,12 +1502,16 @@
       const distance = Math.hypot(cookie.x - perk.x, cookie.y - perk.y);
       if (distance > cookieRadius(cookie) + perk.r) return;
 
-      if (perk.type === "honey") {
-        state.honeyUntil = performance.now() + 6500;
-        showFlash("MIELE", 850);
+      if (perk.type === "milk") {
+        state.milkUntil = performance.now() + 8500;
+        state.milkCharges = 3;
+        showFlash("LATTE+", 850);
       } else if (perk.type === "slow") {
         state.slowUntil = performance.now() + 6000;
         showFlash("SLOW GROOVE", 850);
+      } else if (perk.type === "delay") {
+        state.delayUntil = performance.now() + 10000;
+        showFlash("DELAY x3", 850);
       } else {
         state.doubleUntil = performance.now() + 5000;
         showFlash("DISCOTTI x2", 850);
@@ -1249,44 +1521,150 @@
     }
 
     function maybeStartSplit() {
-      if (state.splitCookies || state.score < state.splitAtScore) return;
-      state.splitAtScore += 34;
+      if (state.splitCookies || state.splitMerge || isLsdActive() || !majorEventsReady() || state.score < state.splitAtScore) return;
+      state.splitAtScore += 58;
       const c = state.cookie;
       const speedY = -Math.max(260, Math.abs(c.vy) * .72);
       state.splitCookies = [
-        { x: c.x - c.r * .45, y: c.y, r: c.r * .92, vx: -Math.max(190, Math.abs(c.vx) + 85), vy: speedY, spin: c.spin, touched: false },
-        { x: c.x + c.r * .45, y: c.y, r: c.r * .92, vx: Math.max(190, Math.abs(c.vx) + 85), vy: speedY, spin: c.spin, touched: false }
+        { x: c.x - c.r * .45, y: c.y, r: c.r * .92, vx: -Math.max(190, Math.abs(c.vx) + 85), vy: speedY, spin: c.spin, touched: false, cornerArmed: false },
+        { x: c.x + c.r * .45, y: c.y, r: c.r * .92, vx: Math.max(190, Math.abs(c.vx) + 85), vy: speedY, spin: c.spin, touched: false, cornerArmed: false }
       ];
       state.perk = null;
+      state.bassBoost = null;
+      state.nextBassAt = state.elapsed + 30;
+      blockMajorEvents(1600);
       showFlash("DOPPIO BISCOTTO", 1100);
     }
 
+    function startSplitMerge() {
+      if (!state.splitCookies || state.splitMerge) return;
+      const targetX = state.width / 2;
+      const targetY = state.cookie.r + 72;
+      state.splitMerge = {
+        start: performance.now(),
+        duration: 720,
+        targetX,
+        targetY,
+        from: state.splitCookies.map((cookie) => ({ x: cookie.x, y: cookie.y, spin: cookie.spin }))
+      };
+      showFlash("RIUNIONE", 680);
+    }
+
+    function updateSplitMerge() {
+      if (!state.splitMerge || !state.splitCookies) {
+        state.splitMerge = null;
+        return;
+      }
+
+      const merge = state.splitMerge;
+      const t = clamp((performance.now() - merge.start) / merge.duration, 0, 1);
+      const eased = 1 - Math.pow(1 - t, 3);
+      state.splitCookies.forEach((cookie, index) => {
+        const from = merge.from[index];
+        const lift = Math.sin(t * Math.PI) * 42;
+        cookie.x = from.x + (merge.targetX - from.x) * eased;
+        cookie.y = from.y + (merge.targetY - from.y) * eased - lift;
+        cookie.spin += .16;
+      });
+
+      if (t >= 1) triggerSplitFinale(merge.targetX, merge.targetY);
+    }
+
     function triggerSplitFinale(x, y) {
-      const events = ["bass", "honey", "slow", "bonus"];
-      const event = events[Math.floor(Math.random() * events.length)];
       state.cookie = {
         x,
         y,
         r: clamp(state.width * .047, 15, 25),
         vx: (Math.random() < .5 ? -1 : 1) * rand(180, 310),
         vy: Math.max(280, state.height * .34),
-        spin: 0
+        spin: 0,
+        cornerArmed: false
       };
       state.splitCookies = null;
+      state.splitMerge = null;
+      addScore(4);
+      state.nextLsdAtScore = Math.max(state.nextLsdAtScore, state.score + 18);
+      blockMajorEvents(5200);
+      showFlash("RIUNITI +4", 900);
+      state.shake = 1.8;
+    }
 
-      if (event === "bass") {
-        triggerBassDrop();
-      } else if (event === "honey") {
-        state.honeyUntil = performance.now() + 8000;
-        showFlash("MIELE PAZZO", 1000);
-      } else if (event === "slow") {
-        state.slowUntil = performance.now() + 6500;
-        showFlash("SLOW PAZZO", 1000);
-      } else {
-        state.doubleUntil = performance.now() + 7000;
-        showFlash("DISCOTTI x2", 1000);
+    function maybeStartLsd() {
+      if (isLsdActive() || state.splitCookies || state.splitMerge || !majorEventsReady() || state.score < state.nextLsdAtScore) return;
+      state.nextLsdAtScore += 72;
+      state.lsdUntil = performance.now() + 8200;
+      state.lsdDecoys = Array.from({ length: 5 }, () => ({
+        x: rand(state.width * .18, state.width * .82),
+        y: rand(state.height * .16, state.height * .56),
+        r: state.cookie.r * rand(.86, 1.06),
+        vx: rand(-42, 42),
+        vy: rand(-28, 34),
+        spin: rand(-2, 2)
+      }));
+      state.perk = null;
+      state.bassBoost = null;
+      state.nextBassAt = state.elapsed + 30;
+      blockMajorEvents(9000);
+      showFlash("FASE LSD", 1100);
+    }
+
+    function updateLsdDecoys(dt) {
+      if (!isLsdActive()) {
+        state.lsdDecoys = [];
+        return;
       }
-      state.shake = 2.4;
+
+      state.lsdDecoys.forEach((decoy, index) => {
+        decoy.x += (decoy.vx + Math.sin(state.elapsed * 3 + index) * 18) * dt;
+        decoy.y += (decoy.vy + Math.cos(state.elapsed * 2.4 + index) * 14) * dt;
+        decoy.spin += dt * (index % 2 ? -2.4 : 2.4);
+
+        const minX = decoy.r + 14;
+        const maxX = state.width - decoy.r - 14;
+        const minY = 74;
+        const maxY = state.height - state.speaker.h - 112;
+        if (decoy.x < minX || decoy.x > maxX) {
+          decoy.x = clamp(decoy.x, minX, maxX);
+          decoy.vx *= -1;
+        }
+        if (decoy.y < minY || decoy.y > maxY) {
+          decoy.y = clamp(decoy.y, minY, maxY);
+          decoy.vy *= -1;
+        }
+      });
+    }
+
+    function triggerHorseMode() {
+      const now = performance.now();
+      state.horseUntil = now + 5000;
+      state.horseFadeUntil = now + 6400;
+      state.horseHorde = Array.from({ length: 26 }, (_, index) => ({
+        x: rand(-state.width * .12, state.width * 1.05),
+        y: rand(state.height * .18, state.height * .7),
+        vx: rand(18, 46) * (index % 2 ? 1 : -1),
+        drift: rand(.7, 1.8),
+        size: 22 + (index % 5) * 4,
+        phase: rand(0, Math.PI * 2)
+      }));
+      playHorseNeigh();
+      showFlash("CAVALLO: PUNTI /2", 1050);
+    }
+
+    function updateHorseHorde(dt) {
+      if (!isHorseVisible()) {
+        state.horseHorde = [];
+        state.horsePointCarry = 0;
+        return;
+      }
+
+      if (!isHorseActive()) state.horsePointCarry = 0;
+
+      state.horseHorde.forEach((horse) => {
+        horse.x += horse.vx * dt;
+        horse.y += Math.sin(state.elapsed * horse.drift + horse.phase) * 7 * dt;
+        if (horse.x < -60) horse.x = state.width + rand(10, 70);
+        if (horse.x > state.width + 60) horse.x = -rand(10, 70);
+      });
     }
 
     function drawBackground() {
@@ -1311,6 +1689,7 @@
       ctx.strokeStyle = "rgba(11, 42, 146, .22)";
       ctx.lineWidth = 2;
       ctx.strokeRect(10, 60, state.width - 20, state.height - 132);
+      drawCornerPockets();
 
       if (bass) {
         ctx.save();
@@ -1342,10 +1721,12 @@
       ctx.restore();
     }
 
-    function drawCookie(cookie) {
+    function drawCookie(cookie, options = {}) {
       const c = cookie || state.cookie;
       const radius = cookieRadius(c);
+      if (options.delayTrail) drawDelayTrail(c, radius);
       ctx.save();
+      if (options.alpha) ctx.globalAlpha = options.alpha;
       ctx.translate(c.x + rand(-state.shake, state.shake), c.y + rand(-state.shake, state.shake));
       ctx.rotate(c.spin);
 
@@ -1371,12 +1752,171 @@
       ctx.beginPath();
       ctx.arc(0, 0, radius - 3, .25, Math.PI * 1.34);
       ctx.stroke();
+      if (options.originalMark) {
+        ctx.strokeStyle = "#0b2a92";
+        ctx.lineWidth = 3;
+        ctx.shadowColor = "rgba(11, 42, 146, .38)";
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "#0b2a92";
+        ctx.beginPath();
+        ctx.arc(radius * .42, -radius * .48, radius * .16, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
 
+    function drawDelayTrail(cookie, radius) {
+      if (!isDelayActive()) return;
+
+      const speed = Math.hypot(cookie.vx || 0, cookie.vy || 0);
+      const dirX = speed > 1 ? -(cookie.vx || 0) / speed : 0;
+      const dirY = speed > 1 ? -(cookie.vy || 0) / speed : 1;
+      const ghosts = [
+        { distance: radius * 1.45, alpha: .34, scale: .94 },
+        { distance: radius * 2.65, alpha: .16, scale: .86 }
+      ];
+
+      ghosts.reverse().forEach((ghost) => {
+        const x = cookie.x + dirX * ghost.distance;
+        const y = cookie.y + dirY * ghost.distance;
+        const r = radius * ghost.scale;
+
+        ctx.save();
+        ctx.globalAlpha = ghost.alpha;
+        ctx.translate(x, y);
+        ctx.rotate(cookie.spin * .82);
+        ctx.shadowColor = "rgba(11, 42, 146, .28)";
+        ctx.shadowBlur = 8;
+
+        const grad = ctx.createRadialGradient(-r * .35, -r * .45, r * .2, 0, 0, r);
+        grad.addColorStop(0, "#fff0bf");
+        grad.addColorStop(.72, "#c98636");
+        grad.addColorStop(1, "#8f5424");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#583019";
+        [[-.42, -.28, .18], [.16, -.38, .15], [.42, .05, .17], [-.1, .18, .14]].forEach(([chipX, chipY, chipR]) => {
+          ctx.beginPath();
+          ctx.arc(chipX * r, chipY * r, chipR * r, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        ctx.strokeStyle = "rgba(11, 42, 146, .45)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, r + 3, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      });
+    }
+
     function drawCookies() {
+      if (isLsdActive()) {
+        state.lsdDecoys.forEach((cookie) => drawCookie(cookie, { alpha: .48 }));
+      }
       const cookies = state.splitCookies || [state.cookie];
-      cookies.forEach((cookie) => drawCookie(cookie));
+      cookies.forEach((cookie) => drawCookie(cookie, {
+        delayTrail: !isLsdActive(),
+        originalMark: isLsdActive() && !state.splitCookies
+      }));
+    }
+
+    function drawHorseHorde() {
+      if (!isHorseVisible()) return;
+
+      const now = performance.now();
+      const activeAlpha = .06 + clamp((state.horseUntil - now) / 5000, 0, 1) * .08;
+      const fadeAlpha = Math.max(0, state.horseFadeUntil - now) / Math.max(1, state.horseFadeUntil - state.horseUntil);
+      ctx.save();
+      ctx.globalAlpha = isHorseActive() ? activeAlpha : activeAlpha * fadeAlpha;
+      state.horseHorde.forEach((horse) => {
+        const sprite = getHorseSprite(horse.size);
+        ctx.save();
+        ctx.translate(horse.x, horse.y);
+        ctx.rotate(Math.sin(state.elapsed * horse.drift + horse.phase) * .08);
+        ctx.drawImage(sprite, -sprite.width / 2, -sprite.height / 2);
+        ctx.restore();
+      });
+      ctx.restore();
+    }
+
+    function getHorseSprite(size) {
+      const key = Math.round(size);
+      if (horseSpriteCache.has(key)) return horseSpriteCache.get(key);
+
+      const canvas = document.createElement("canvas");
+      const box = Math.ceil(key * 1.55);
+      canvas.width = box;
+      canvas.height = box;
+      const spriteCtx = canvas.getContext("2d");
+      spriteCtx.font = `${key}px serif`;
+      spriteCtx.textAlign = "center";
+      spriteCtx.textBaseline = "middle";
+      spriteCtx.fillText(String.fromCodePoint(0x1F40E), box / 2, box / 2 + key * .04);
+      horseSpriteCache.set(key, canvas);
+      return canvas;
+    }
+
+    function drawCornerPockets() {
+      ["left", "right"].forEach((side) => {
+        const pocket = getCornerPocket(side);
+        const pulse = side === state.cornerPulseSide ? clamp((state.cornerPulseUntil - performance.now()) / 520, 0, 1) : 0;
+        const burst = side === state.cornerBurstSide && performance.now() < state.cornerBurstUntil;
+        const filled = burst ? 5 : Math.min(5, state.cornerStreak);
+        const r = pocket.visualR;
+        ctx.save();
+        ctx.translate(pocket.x, pocket.y);
+        if (pulse) {
+          ctx.shadowColor = "rgba(201, 134, 54, .42)";
+          ctx.shadowBlur = 14 * pulse;
+        }
+        ctx.fillStyle = "rgba(255, 255, 255, .78)";
+        ctx.strokeStyle = "rgba(11, 42, 146, .36)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, r + pulse * 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "rgba(11, 42, 146, .08)";
+        ctx.beginPath();
+        ctx.arc(0, 0, r * .55, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        const railX = side === "left" ? 18 : state.width - 18;
+        const railY = Math.max(122, state.height * .17);
+        for (let index = 0; index < 5; index += 1) {
+          const active = index < filled;
+          const x = railX - pocket.x;
+          const y = railY + index * 13 - pocket.y;
+          ctx.fillStyle = active ? (burst ? "#ffd98b" : "#c98636") : "rgba(201, 134, 54, .28)";
+          ctx.beginPath();
+          ctx.arc(x, y, active ? 3.8 + pulse * 1.2 : 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          if (active) {
+            ctx.fillStyle = "#583019";
+            ctx.beginPath();
+            ctx.arc(x + 1.2, y - .8, 1, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
+        if (filled > 0) {
+          ctx.strokeStyle = `rgba(201, 134, 54, ${.24 + filled * .09})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(railX - pocket.x, railY - 8 - pocket.y);
+          ctx.lineTo(railX - pocket.x, railY + 60 - pocket.y);
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
     }
 
     function drawPerk() {
@@ -1388,7 +1928,7 @@
       ctx.translate(perk.x, perk.y);
       ctx.scale(pulse, pulse);
       ctx.globalAlpha = clamp((perk.until - performance.now()) / 900, .35, 1);
-      ctx.fillStyle = "rgba(255,255,255,.88)";
+      ctx.fillStyle = perk.type === "milk" ? "rgba(255,255,255,.96)" : "rgba(255,255,255,.88)";
       ctx.strokeStyle = "#0b2a92";
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -1396,10 +1936,36 @@
       ctx.fill();
       ctx.stroke();
       ctx.fillStyle = "#0b2a92";
-      ctx.font = "900 11px Inter, system-ui, sans-serif";
+      ctx.font = "900 9px Inter, system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(perk.type === "honey" ? "M" : perk.type === "slow" ? "S" : "x2", 0, 1);
+      ctx.fillText(perk.type === "milk" ? "L+" : perk.type === "slow" ? "S" : perk.type === "delay" ? "DLY" : "x2", 0, 1);
+      ctx.restore();
+    }
+
+    function drawBassBoost() {
+      const boost = state.bassBoost;
+      if (!boost) return;
+
+      const pulse = 1 + Math.sin(state.elapsed * 10) * .1;
+      ctx.save();
+      ctx.translate(boost.x, boost.y);
+      ctx.scale(pulse, pulse);
+      ctx.globalAlpha = clamp((boost.until - performance.now()) / 700, .35, 1);
+      ctx.fillStyle = "rgba(11, 42, 146, .92)";
+      ctx.beginPath();
+      ctx.arc(0, 0, boost.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255, 255, 255, .86)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, boost.r + 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = "900 10px Inter, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("B", 0, .5);
       ctx.restore();
     }
 
@@ -1435,10 +2001,17 @@
       roundRect(x + 8, y + 5, s.w - 16, s.h - 10, 5);
       ctx.fill();
 
-      const perfectW = Math.max(18, s.w * .23);
-      ctx.fillStyle = "#fff1a8";
+      const perfectW = getPerfectHalfWidth() * 2;
+      ctx.save();
+      ctx.shadowColor = "rgba(255, 241, 168, .75)";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "rgba(255, 246, 190, .48)";
       roundRect(s.x - perfectW / 2, y + 5, perfectW, s.h - 10, 5);
       ctx.fill();
+      ctx.strokeStyle = "rgba(255, 255, 255, .72)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
 
       const coneR = s.h * .34;
       drawCone(x + s.w * .32, s.y, coneR);
@@ -1482,7 +2055,9 @@
       state.last = now;
       update(dt);
       drawBackground();
+      drawHorseHorde();
       drawPerk();
+      drawBassBoost();
       drawSpeaker();
       drawCookies();
       drawBassDropStatus();
@@ -1493,7 +2068,9 @@
     resize();
     loadLeaderboard();
     drawBackground();
+    drawHorseHorde();
     drawPerk();
+    drawBassBoost();
     drawSpeaker();
     drawCookies();
     drawBassDropStatus();
